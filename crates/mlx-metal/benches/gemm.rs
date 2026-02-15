@@ -64,6 +64,9 @@ fn bench_gemm(c: &mut Criterion) {
 criterion_group!(benches, bench_gemm);
 
 #[cfg(not(target_os = "macos"))]
+use criterion::{criterion_group, criterion_main, Criterion};
+
+#[cfg(not(target_os = "macos"))]
 fn bench_gemm(_c: &mut Criterion) {}
 
 #[cfg(not(target_os = "macos"))]
