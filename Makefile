@@ -1,4 +1,8 @@
 # oxidizedMLX local CI entrypoint.
+# oxidizedMLX Makefile
+#
+# Make-based local CI entrypoint, mirroring GitHub Actions defaults and the
+# existing `just ci` workflow.
 #
 # Usage:
 #   make lci          # cached local CI (fmt + clippy + test)
@@ -34,16 +38,27 @@ lci-ffi:
 	@./tools/lci/lci --ffi
 
 fmt-check:
-	cargo fmt --all --check
+	cargo fmt --all -- --check
 
-clippy:
+clippy-check:
 	cargo clippy --workspace --exclude mlx-sys --all-targets -- -D warnings
 
-test:
+# Mirrors CI defaults (no FFI required)
+# Exclude mlx-conformance because it depends on Python MLX being installed.
+
+test-cpu:
 	cargo test --workspace --exclude mlx-sys --exclude mlx-conformance
+
+# Requires an MLX source checkout providing the C ABI shim (see crates/mlx-sys/build.rs)
 
 test-ffi:
 	cargo test --workspace
 
 clippy-ffi:
 	cargo clippy --workspace --all-targets -- -D warnings
+
+conformance:
+	cargo test -p mlx-conformance
+
+smoke:
+	cargo run -p mlx-cli -- smoke
