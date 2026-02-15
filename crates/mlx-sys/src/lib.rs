@@ -163,7 +163,7 @@ mod tests {
             assert_eq!(
                 dt,
                 mlx_device_type_t::CPU,
-                "default device should match mlx-core (CPU)"
+                "Apple Silicon should default to CPU until Metal is enabled"
             );
             #[cfg(not(target_os = "macos"))]
             assert_eq!(
