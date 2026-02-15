@@ -78,11 +78,7 @@ impl Tensor {
     }
 
     /// Create a tensor from f32 data on a specific stream.
-    pub fn from_f32_on_stream(
-        data: &[f32],
-        shape: &Shape,
-        stream: &Arc<Stream>,
-    ) -> Result<Self> {
+    pub fn from_f32_on_stream(data: &[f32], shape: &Shape, stream: &Arc<Stream>) -> Result<Self> {
         let expected = shape.numel() as usize;
         if data.len() != expected {
             return Err(MlxError::InvalidArgument(format!(

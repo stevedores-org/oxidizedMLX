@@ -61,7 +61,11 @@ impl PipelineCache {
     }
 
     pub(crate) fn get_scaled_softmax_f32(&self, device: &Device) -> Result<ComputePipelineState> {
-        self.get_or_build(device, "scaled_softmax_f32", include_str!("kernels/attention.metal"))
+        self.get_or_build(
+            device,
+            "scaled_softmax_f32",
+            include_str!("kernels/attention.metal"),
+        )
     }
 
     pub(crate) fn get_rms_norm_f32(&self, device: &Device) -> Result<ComputePipelineState> {
@@ -97,15 +101,27 @@ impl PipelineCache {
     }
 
     pub(crate) fn get_silu_f32(&self, device: &Device) -> Result<ComputePipelineState> {
-        self.get_or_build(device, "silu_f32", include_str!("kernels/elementwise.metal"))
+        self.get_or_build(
+            device,
+            "silu_f32",
+            include_str!("kernels/elementwise.metal"),
+        )
     }
 
     pub(crate) fn get_gelu_f32(&self, device: &Device) -> Result<ComputePipelineState> {
-        self.get_or_build(device, "gelu_f32", include_str!("kernels/elementwise.metal"))
+        self.get_or_build(
+            device,
+            "gelu_f32",
+            include_str!("kernels/elementwise.metal"),
+        )
     }
 
     pub(crate) fn get_transpose_2d_f32(&self, device: &Device) -> Result<ComputePipelineState> {
-        self.get_or_build(device, "transpose_2d_f32", include_str!("kernels/elementwise.metal"))
+        self.get_or_build(
+            device,
+            "transpose_2d_f32",
+            include_str!("kernels/elementwise.metal"),
+        )
     }
 
     fn get_or_build(
