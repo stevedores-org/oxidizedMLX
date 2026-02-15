@@ -24,6 +24,11 @@ fn box_tensor(t: Tensor) -> *mut mlx_tensor_t {
     Box::into_raw(Box::new(t)) as *mut mlx_tensor_t
 }
 
+/// # Safety
+///
+/// `p` must be a valid pointer obtained from `box_tensor` that has not been freed.
+/// The returned reference is valid only as long as `p` is live — callers must not
+/// use the reference after calling `mlxrs_free_tensor(p)`.
 unsafe fn ref_tensor<'a>(p: *mut mlx_tensor_t) -> &'a Tensor {
     unsafe { &*(p as *const Tensor) }
 }
@@ -32,6 +37,11 @@ fn box_device(d: Device) -> *mut mlx_device_t {
     Box::into_raw(Box::new(d)) as *mut mlx_device_t
 }
 
+/// # Safety
+///
+/// `p` must be a valid pointer obtained from `box_device` that has not been freed.
+/// The returned reference is valid only as long as `p` is live — callers must not
+/// use the reference after calling `mlxrs_free_device(p)`.
 unsafe fn ref_device<'a>(p: *mut mlx_device_t) -> &'a Device {
     unsafe { &*(p as *const Device) }
 }

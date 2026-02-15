@@ -119,11 +119,16 @@ pub fn vjp(
             // Sum over dimensions that were broadcast from size 1
             for i in 0..input_shape.ndim() {
                 if input_shape.0[i] == 1 && grad_input.shape().0[i] != 1 {
+                    let ndim_before = grad_input.shape().ndim();
                     grad_input = grad_input.sum_axis(i as i32)?;
-                    // sum_axis removes the dim, we need to keep it as size 1
-                    let mut reshape_dims = grad_input.shape().0.clone();
-                    reshape_dims.insert(i, 1);
-                    grad_input = grad_input.reshape(&Shape::new(reshape_dims))?;
+                    // sum_axis removes the dim — re-insert as size 1 to preserve rank.
+                    // When sum_axis reduces a 1-D tensor it yields [1] instead of [],
+                    // so only reshape if the dimension was actually removed.
+                    if grad_input.shape().ndim() < ndim_before {
+                        let mut reshape_dims = grad_input.shape().0.clone();
+                        reshape_dims.insert(i, 1);
+                        grad_input = grad_input.reshape(&Shape::new(reshape_dims))?;
+                    }
                 }
             }
 
@@ -191,6 +196,95 @@ mod tests {
         )
         .unwrap();
         assert_eq!(grads[0].to_vec_f32().unwrap(), vec![1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_rank_extension() {
+        // Broadcast [3] -> [2, 3]: gradient should sum over the added leading dim
+        let input = t(&[1.0, 2.0, 3.0], &[3]);
+        let output = t(&[1.0, 2.0, 3.0, 1.0, 2.0, 3.0], &[2, 3]);
+        let grad_out = t(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: Shape::new(vec![2, 3]),
+            },
+            &[input],
+            &output,
+            &grad_out,
+        )
+        .unwrap();
+        // Sum over axis 0: [1+4, 2+5, 3+6] = [5, 7, 9]
+        assert_eq!(grads[0].to_vec_f32().unwrap(), vec![5.0, 7.0, 9.0]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_dim_expansion() {
+        // Broadcast [1, 3] -> [2, 3]: gradient should sum over the broadcast dim
+        let input = t(&[1.0, 2.0, 3.0], &[1, 3]);
+        let output = t(&[1.0, 2.0, 3.0, 1.0, 2.0, 3.0], &[2, 3]);
+        let grad_out = t(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: Shape::new(vec![2, 3]),
+            },
+            &[input],
+            &output,
+            &grad_out,
+        )
+        .unwrap();
+        // Sum over axis 0, keep dim: [[5, 7, 9]]
+        assert_eq!(grads[0].to_vec_f32().unwrap(), vec![5.0, 7.0, 9.0]);
+        assert_eq!(grads[0].shape().0, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_combined() {
+        // Broadcast [1, 3] -> [4, 2, 3]: rank extension + dim expansion
+        let input = t(&[1.0, 2.0, 3.0], &[1, 3]);
+        let numel = 4 * 2 * 3;
+        let grad_data: Vec<f32> = (0..numel).map(|i| i as f32).collect();
+        let output = t(&vec![0.0; numel], &[4, 2, 3]);
+        let grad_out = t(&grad_data, &[4, 2, 3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: Shape::new(vec![4, 2, 3]),
+            },
+            &[input],
+            &output,
+            &grad_out,
+        )
+        .unwrap();
+        // Result shape should match input: [1, 3]
+        assert_eq!(grads[0].shape().0, vec![1, 3]);
+        // Sum over leading dim 0 (size 4) and dim 0 of remaining (size 2)
+        // grad_out[b, r, c] for b=0..4, r=0..2, c=0..3
+        // After sum over batch(4) and rows(2), each column c gets:
+        // sum over b,r of (b*6 + r*3 + c)
+        let result = grads[0].to_vec_f32().unwrap();
+        // c=0: sum of [0,3,6,9,12,15,18,21] = 84
+        // c=1: sum of [1,4,7,10,13,16,19,22] = 92
+        // c=2: sum of [2,5,8,11,14,17,20,23] = 100
+        assert_eq!(result, vec![84.0, 92.0, 100.0]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_scalar() {
+        // Broadcast [] -> [2, 3]: scalar to matrix
+        let input = t(&[1.0], &[1]);
+        let grad_out = t(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let output = t(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0], &[2, 3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: Shape::new(vec![2, 3]),
+            },
+            &[input],
+            &output,
+            &grad_out,
+        )
+        .unwrap();
+        // Sum everything: 1+2+3+4+5+6 = 21
+        assert_eq!(grads[0].to_vec_f32().unwrap(), vec![21.0]);
+        assert_eq!(grads[0].shape().0, vec![1]);
     }
 
     #[test]

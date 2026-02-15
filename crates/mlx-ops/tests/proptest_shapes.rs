@@ -53,18 +53,7 @@ fn arb_dtype() -> impl Strategy<Value = DType> {
     ]
 }
 
-/// Numeric priority for dtype promotion (higher = wider).
-///
-/// Keep in sync with `crates/mlx-ops/src/dtype_promotion.rs`.
-fn dtype_priority(dt: DType) -> u8 {
-    match dt {
-        DType::I32 => 1,
-        DType::I64 => 2,
-        DType::F16 => 3,
-        DType::BF16 => 4,
-        DType::F32 => 5,
-    }
-}
+use mlx_ops::dtype_promotion::priority as dtype_priority;
 
 /// Generate a 2D shape for matmul.
 fn matmul_shapes() -> impl Strategy<Value = (Shape, Shape)> {

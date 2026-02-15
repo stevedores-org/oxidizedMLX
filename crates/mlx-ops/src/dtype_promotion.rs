@@ -22,7 +22,7 @@ pub fn promote(a: DType, b: DType) -> DType {
 }
 
 /// Numeric priority for dtype promotion (higher = wider).
-fn priority(dt: DType) -> u8 {
+pub fn priority(dt: DType) -> u8 {
     match dt {
         DType::I32 => 1,
         DType::I64 => 2,

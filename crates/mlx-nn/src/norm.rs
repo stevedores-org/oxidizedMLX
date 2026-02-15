@@ -9,6 +9,7 @@ use crate::Module;
 /// Normalizes to zero mean and unit variance, controlled by `eps` for
 /// numerical stability.
 pub struct LayerNorm {
+    /// Reserved for learnable scale/shift parameters (Phase 2).
     #[allow(dead_code)]
     dim: usize,
     eps: f32,
@@ -31,6 +32,7 @@ impl Module for LayerNorm {
 /// Like LayerNorm but skips the mean-centering step, normalizing only by
 /// the root-mean-square.
 pub struct RmsNorm {
+    /// Reserved for learnable scale parameter (Phase 2).
     #[allow(dead_code)]
     dim: usize,
     eps: f32,
