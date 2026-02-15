@@ -549,9 +549,13 @@ fn gh_with_retries_owned(args: Vec<String>, max_attempts: usize) -> Result<Vec<u
         if attempt < max_attempts && is_transient_gh_error(&combined) {
             // Exponential backoff with deterministic jitter.
             // (No RNG dependency; this is just to avoid hammering.)
-            let base_ms = 250u64.saturating_mul(1u64 << attempt.min(6));
+            let base_ms = 200u64.saturating_mul(1u64 << attempt.min(4));
             let jitter_ms = (attempt as u64 * 137) % 200;
-            let sleep_ms = (base_ms + jitter_ms).min(30_000);
+            let sleep_ms = (base_ms + jitter_ms).min(5_000);
+            eprintln!(
+                "gh retry {attempt}/{max_attempts} after transient error (sleep {sleep_ms}ms): {}",
+                combined.lines().next().unwrap_or("<no output>")
+            );
             std::thread::sleep(Duration::from_millis(sleep_ms));
             continue;
         }
