@@ -35,6 +35,13 @@ impl Sgd {
 
 impl Optimizer for Sgd {
     fn step(&mut self, params: &[Tensor], grads: &[Tensor]) -> Result<Vec<Tensor>> {
+        if params.len() != grads.len() {
+            return Err(mlx_core::MlxError::InvalidArgument(format!(
+                "params length {} != grads length {}",
+                params.len(),
+                grads.len()
+            )));
+        }
         // Initialize velocity on first call
         if self.velocity.is_empty() {
             self.velocity = params
@@ -117,6 +124,13 @@ impl AdamW {
 
 impl Optimizer for AdamW {
     fn step(&mut self, params: &[Tensor], grads: &[Tensor]) -> Result<Vec<Tensor>> {
+        if params.len() != grads.len() {
+            return Err(mlx_core::MlxError::InvalidArgument(format!(
+                "params length {} != grads length {}",
+                params.len(),
+                grads.len()
+            )));
+        }
         // Initialize moments on first call
         if self.m.is_empty() {
             self.m = params
@@ -177,8 +191,8 @@ impl Optimizer for AdamW {
 
 /// Create a scalar tensor broadcast to the same shape/dtype/device as `like`.
 fn scalar_like(val: f32, like: &Tensor) -> Result<Tensor> {
-    let data = vec![val; like.numel() as usize];
-    Tensor::from_f32(&data, like.shape(), like.device())
+    Tensor::from_f32(&[val], &mlx_core::Shape::scalar(), like.device())?
+        .broadcast_to(like.shape())
 }
 
 #[cfg(test)]

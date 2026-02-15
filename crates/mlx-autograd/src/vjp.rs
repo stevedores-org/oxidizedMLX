@@ -160,12 +160,13 @@ pub fn vjp(
         OpKind::Sqrt => {
             // d(sqrt(x))/dx = 0.5 / sqrt(x)
             // But we need sqrt(x) = output, so: grad / (2 * output)
-            let two = Tensor::from_f32(
-                &vec![2.0; _output.numel() as usize],
-                _output.shape(),
-                _output.device(),
-            )?;
-            let grad_input = grad_output.div(&_output.mul(&two)?)?;
+            // Clamp output to avoid Inf/NaN when sqrt(x) == 0
+            let eps = Tensor::from_f32(&[f32::EPSILON], &Shape::scalar(), _output.device())?
+                .broadcast_to(_output.shape())?;
+            let safe_output = _output.add(&eps)?;
+            let two = Tensor::from_f32(&[2.0], &Shape::scalar(), _output.device())?
+                .broadcast_to(_output.shape())?;
+            let grad_input = grad_output.div(&safe_output.mul(&two)?)?;
             Ok(vec![grad_input])
         }
 
