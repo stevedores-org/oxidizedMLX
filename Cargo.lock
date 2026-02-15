@@ -695,7 +695,6 @@ dependencies = [
  "criterion",
  "metal",
  "mlx-core",
- "objc",
  "rand",
  "smallvec",
 ]

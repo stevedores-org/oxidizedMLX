@@ -98,13 +98,20 @@ kernel void add_f32(device const float* a [[buffer(0)]],
 
         /// Create a shared-memory buffer from an `f32` slice.
         fn data_to_buffer(&self, data: &[f32]) -> Buffer {
-            let byte_len = std::mem::size_of_val(data) as u64;
+            // Metal buffers must have a non-zero length. When `data` is empty,
+            // allocate a minimal buffer of one `f32` and skip the copy.
+            let mut byte_len = std::mem::size_of_val(data) as u64;
+            if byte_len == 0 {
+                byte_len = std::mem::size_of::<f32>() as u64;
+            }
             let buffer = self
                 .device
                 .new_buffer(byte_len, MTLResourceOptions::StorageModeShared);
-            unsafe {
-                let dst = buffer.contents() as *mut f32;
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
+            if !data.is_empty() {
+                unsafe {
+                    let dst = buffer.contents() as *mut f32;
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
+                }
             }
             buffer
         }
@@ -192,7 +199,7 @@ kernel void add_f32(device const float* a [[buffer(0)]],
         }
 
         /// Matrix multiplication on the GPU (tiled kernel).
-        fn eval_matmul(&self, inputs: &[NodeInput<'_>], _meta: &TensorMeta) -> Result<Vec<f32>> {
+        fn eval_matmul(&self, inputs: &[NodeInput<'_>], meta: &TensorMeta) -> Result<Vec<f32>> {
             if inputs.len() != 2 {
                 return Err(MlxError::InvalidArgument(
                     "MatMul requires exactly 2 inputs".into(),
@@ -215,6 +222,23 @@ kernel void add_f32(device const float* a [[buffer(0)]],
                 return Err(MlxError::ShapeMismatch {
                     expected: vec![m as i64, k as i64],
                     got: vec![k2 as i64, n as i64],
+                });
+            }
+
+            // Validate that buffer lengths match their declared shapes.
+            if inputs[0].data.len() != (m * k) as usize || inputs[1].data.len() != (k * n) as usize {
+                return Err(MlxError::InvalidArgument(format!(
+                    "MatMul input buffer length mismatch: a={}, b={}",
+                    inputs[0].data.len(),
+                    inputs[1].data.len()
+                )));
+            }
+
+            // Validate that the output metadata matches the computed shape.
+            if meta.shape.ndim() != 2 || meta.shape.0[0] != m as i64 || meta.shape.0[1] != n as i64 {
+                return Err(MlxError::ShapeMismatch {
+                    expected: vec![m as i64, n as i64],
+                    got: meta.shape.0.clone(),
                 });
             }
 

@@ -45,8 +45,8 @@ kernel void tiled_gemm_f32(device const float* A   [[buffer(0)]],
     uint row = group_id.y * TM + local_id.y;
     uint col = group_id.x * TN + local_id.x;
 
-    threadgroup float As[16][16];
-    threadgroup float Bs[16][16];
+    threadgroup float As[TM][TK];
+    threadgroup float Bs[TK][TN];
 
     float acc = 0.0f;
 

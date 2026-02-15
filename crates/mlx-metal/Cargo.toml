@@ -10,7 +10,6 @@ mlx-core = { path = "../mlx-core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.31"
-objc = "0.2"
 
 [dev-dependencies]
 smallvec = "1"
