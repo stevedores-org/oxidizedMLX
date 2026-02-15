@@ -1,0 +1,66 @@
+name: Story
+description: A single feature implementation with tests + acceptance criteria
+title: "Story: <feature>"
+labels: ["story"]
+body:
+  - type: textarea
+    id: user_story
+    attributes:
+      label: User Story
+      description: Who wants this and why?
+      placeholder: |
+        As an LLM engineer,
+        I want RMSNorm on Metal,
+        so inference runs efficiently on Apple Silicon.
+    validations:
+      required: true
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Exact behavior + constraints
+      placeholder: |
+        - FP16 input, FP32 accumulation
+        - axis=-1 only
+        - Supports hidden dims up to 8192
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: Implementation checklist
+      placeholder: |
+        - [ ] Add kernel: rmsnorm_fp16.metal
+        - [ ] Add Rust dispatch: norm.rs
+        - [ ] Add golden tests
+        - [ ] Add perf baseline bench
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test Checklist
+      description: What tests must exist before merge?
+      placeholder: |
+        - [ ] Unit tests (shape validation)
+        - [ ] Golden tests vs Python MLX
+        - [ ] Parity test (Metal vs CPU)
+        - [ ] Stress test (optional)
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Conditions required to close the story
+      placeholder: |
+        - cargo test -p mlx-metal passes
+        - Golden output matches tolerance
+        - Parity suite includes this op
+    validations:
+      required: true
