@@ -152,7 +152,9 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                             });
                         }
                         if seen[x] {
-                            return Err(ShapeError::Mismatch(format!("duplicate axis {x} in transpose")));
+                            return Err(ShapeError::Mismatch(format!(
+                                "duplicate axis {x} in transpose"
+                            )));
                         }
                         seen[x] = true;
                     }

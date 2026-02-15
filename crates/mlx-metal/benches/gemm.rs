@@ -2,12 +2,9 @@
 // Currently a no-op stub; the real benchmark will be enabled once the
 // Metal stream API lands.
 
-fn main() {
-    #[cfg(target_os = "macos")]
-    eprintln!("gemm bench: metal_stream() not yet available — skipping");
-}
 #[cfg(target_os = "macos")]
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Throughput};
+use criterion::{Criterion, criterion_group, criterion_main};
 #[cfg(target_os = "macos")]
 use mlx_core::graph::{OpKind, TensorMeta};
 #[cfg(target_os = "macos")]

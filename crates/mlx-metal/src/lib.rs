@@ -38,7 +38,6 @@ pub fn metal_stream() -> mlx_core::Result<std::sync::Arc<mlx_core::backend::Stre
 
 #[cfg(not(target_os = "macos"))]
 mod stubs {
-    use crate::MetalError;
     use mlx_core::Result;
 
     /// Stub context for non-macOS platforms.
