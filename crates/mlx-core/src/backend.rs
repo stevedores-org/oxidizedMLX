@@ -153,6 +153,16 @@ impl Stream {
     pub fn get_buffer(&self, id: NodeId) -> Option<Vec<f32>> {
         self.buffers.lock().unwrap().get(&id).cloned()
     }
+
+    /// Get a clone of a graph node by ID.
+    pub fn get_node(&self, id: NodeId) -> Option<Node> {
+        self.graph.lock().unwrap().get(id).cloned()
+    }
+
+    /// Topological sort of the subgraph rooted at the given outputs.
+    pub fn topo_sort(&self, outputs: &[NodeId]) -> Vec<NodeId> {
+        self.graph.lock().unwrap().topo_sort(outputs)
+    }
 }
 
 impl std::fmt::Debug for Stream {

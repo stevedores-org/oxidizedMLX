@@ -7,3 +7,6 @@ description = "Neural network modules: Linear, LayerNorm, Attention, etc."
 
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+
+[dev-dependencies]
+mlx-conformance = { path = "../mlx-conformance" }
