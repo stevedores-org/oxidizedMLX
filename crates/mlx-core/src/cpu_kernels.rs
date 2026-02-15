@@ -29,6 +29,14 @@ impl Backend for CpuRefBackend {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.iter().map(|x| -x).collect())
             }
+            OpKind::Exp => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.exp()).collect())
+            }
+            OpKind::Log => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.ln()).collect())
+            }
             OpKind::Sum { axis } => reduce_sum(inputs, *axis),
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
@@ -66,11 +74,6 @@ impl Backend for CpuRefBackend {
             } => cpu_rope(inputs, output_meta, *rotary_dim, *pos_offset, *theta),
             OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
             OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
-            } => rope(inputs, *base, *offset, *traditional),
         }
     }
 }

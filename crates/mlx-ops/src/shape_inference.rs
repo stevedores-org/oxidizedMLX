@@ -36,6 +36,8 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
 
         // Unary ops preserve shape.
         OpKind::Neg
+        | OpKind::Exp
+        | OpKind::Log
         | OpKind::Silu
         | OpKind::Gelu
         | OpKind::Constant

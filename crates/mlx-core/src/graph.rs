@@ -44,6 +44,8 @@ pub enum OpKind {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
 
     // ── Reductions ──────────────────────────────────────────────────────
     Sum {
@@ -105,14 +107,6 @@ pub enum OpKind {
     /// RmsNorm backward: inputs = [grad_output, input], produces grad_input.
     RmsNormVjp {
         eps: f32,
-    },
-
-    // ── Rotary Positional Embeddings ───────────────────────────────────
-    #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
-    RoPE {
-        base: f32,
-        offset: usize,
-        traditional: bool,
     },
 }
 
@@ -277,6 +271,8 @@ enum OpKey {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
     Sum { axis: Option<i32> },
     Mean { axis: Option<i32> },
     Max { axis: Option<i32> },
@@ -291,6 +287,11 @@ enum OpKey {
     Broadcast { target_shape: Vec<i64> },
     LayerNormVjp { eps_bits: u32 },
     RmsNormVjp { eps_bits: u32 },
+    Rope {
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta_bits: u32,
+    },
 }
 
 impl OpKey {
@@ -303,6 +304,8 @@ impl OpKey {
             OpKind::Mul => OpKey::Mul,
             OpKind::Div => OpKey::Div,
             OpKind::Neg => OpKey::Neg,
+            OpKind::Exp => OpKey::Exp,
+            OpKind::Log => OpKey::Log,
             OpKind::Sum { axis } => OpKey::Sum { axis: *axis },
             OpKind::Mean { axis } => OpKey::Mean { axis: *axis },
             OpKind::Max { axis } => OpKey::Max { axis: *axis },
@@ -328,6 +331,15 @@ impl OpKey {
             },
             OpKind::RmsNormVjp { eps } => OpKey::RmsNormVjp {
                 eps_bits: eps.to_bits(),
+            },
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
+            } => OpKey::Rope {
+                rotary_dim: *rotary_dim,
+                pos_offset: *pos_offset,
+                theta_bits: theta.to_bits(),
             },
         }
     }
