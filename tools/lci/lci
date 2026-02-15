@@ -5,6 +5,7 @@
 # Stages that haven't changed since the last successful run are skipped.
 #
 # Usage:
+#   make lci                     # recommended — cached local CI
 #   ./tools/lci/lci              # run all stages (fmt, clippy, test)
 #   ./tools/lci/lci --no-cache   # force all stages to run
 #   ./tools/lci/lci --stage fmt  # run only the fmt stage
@@ -29,6 +30,16 @@ if [[ ! -t 1 ]]; then
     BOLD="" DIM="" GREEN="" RED="" YELLOW="" CYAN="" RESET=""
 fi
 
+# ── Portable sha256 wrapper ─────────────────────────────────────────────
+
+sha256() {
+    if command -v sha256sum &>/dev/null; then
+        sha256sum
+    else
+        shasum -a 256
+    fi
+}
+
 # ── Workspace root detection ────────────────────────────────────────────
 
 find_workspace_root() {
@@ -47,6 +58,8 @@ find_workspace_root() {
 WORKSPACE_ROOT="$(find_workspace_root)"
 CACHE_FILE="$WORKSPACE_ROOT/.lci-cache.json"
 
+VALID_STAGES="fmt clippy test"
+
 # ── CLI flags ───────────────────────────────────────────────────────────
 
 USE_CACHE=true
@@ -57,11 +70,27 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-cache)  USE_CACHE=false; shift ;;
         --ffi)       FFI_MODE=true; shift ;;
-        --stage)     ONLY_STAGE="$2"; shift 2 ;;
+        --stage)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --stage requires an argument (${VALID_STAGES// /, })" >&2
+                exit 1
+            fi
+            case "$2" in
+                fmt|clippy|test)
+                    ONLY_STAGE="$2"
+                    ;;
+                *)
+                    echo "Error: invalid stage '$2'" >&2
+                    echo "Valid stages are: ${VALID_STAGES// /, }" >&2
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
         -h|--help)
             echo "Usage: lci [--no-cache] [--ffi] [--stage STAGE]"
             echo ""
-            echo "Stages: fmt, clippy, test"
+            echo "Stages: ${VALID_STAGES// /, }"
             echo ""
             echo "Options:"
             echo "  --no-cache   Force all stages to run"
@@ -82,19 +111,29 @@ compute_source_hash() {
     cd "$WORKSPACE_ROOT"
     # Fast path: use git if available and in a repo
     if git rev-parse --is-inside-work-tree &>/dev/null; then
-        # Hash of: tracked file content + staged changes + unstaged changes
+        # Hash of: committed tree (HEAD) + staged/unstaged changes + untracked files.
+        # Also includes the lci script and CI workflow so cache invalidates on CI changes.
         local tree_hash
-        tree_hash="$(git write-tree 2>/dev/null || echo "")"
+        tree_hash="$(git rev-parse HEAD^{tree} 2>/dev/null || echo "")"
         local diff_hash
-        diff_hash="$(git diff --no-ext-diff HEAD -- '*.rs' '*.toml' 2>/dev/null | sha256sum | cut -d' ' -f1)"
-        echo "${tree_hash}:${diff_hash}" | sha256sum | cut -d' ' -f1
+        diff_hash="$(git diff --no-ext-diff HEAD -- ':(glob)**/*.rs' ':(glob)**/*.toml' \
+            '.github/workflows/ci.yml' 'tools/lci/lci' 2>/dev/null | sha256 | cut -d' ' -f1)"
+        local untracked_hash
+        untracked_hash="$(git ls-files --others --exclude-standard -z -- '*.rs' '*.toml' 2>/dev/null \
+            | xargs -0 sha256 2>/dev/null \
+            | sha256 \
+            | cut -d' ' -f1)"
+        echo "${tree_hash}:${diff_hash}:${untracked_hash}" | sha256 | cut -d' ' -f1
     else
-        # Fallback: hash all .rs and .toml files
-        find . -name target -prune -o \( -name '*.rs' -o -name '*.toml' \) -print0 \
-            | sort -z \
-            | xargs -0 sha256sum 2>/dev/null \
-            | sha256sum \
-            | cut -d' ' -f1
+        # Fallback: hash all .rs and .toml files, plus CI config and lci script
+        {
+            find . -path '*/target' -prune -o \( -name '*.rs' -o -name '*.toml' \) -print0
+            [[ -f ".github/workflows/ci.yml" ]] && printf '%s\0' ".github/workflows/ci.yml"
+            [[ -f "tools/lci/lci" ]] && printf '%s\0' "tools/lci/lci"
+        } | sort -z \
+          | xargs -0 sha256 2>/dev/null \
+          | sha256 \
+          | cut -d' ' -f1
     fi
 }
 
@@ -103,31 +142,38 @@ compute_source_hash() {
 load_cached_hash() {
     local stage="$1"
     if [[ -f "$CACHE_FILE" ]] && command -v python3 &>/dev/null; then
-        python3 -c "
+        python3 -c '
 import json, sys
+path = sys.argv[1]
+stage = sys.argv[2]
 try:
-    d = json.load(open('$CACHE_FILE'))
-    print(d.get('stages', {}).get('$stage', {}).get('hash', ''))
-except: pass
-" 2>/dev/null
+    with open(path) as f:
+        d = json.load(f)
+    print(d.get("stages", {}).get(stage, {}).get("hash", ""))
+except (json.JSONDecodeError, FileNotFoundError, KeyError):
+    pass
+' "$CACHE_FILE" "$stage" 2>/dev/null
     fi
 }
 
 save_cache() {
     local stage="$1" hash="$2"
     if command -v python3 &>/dev/null; then
-        python3 -c "
-import json, os, time
-path = '$CACHE_FILE'
+        python3 -c '
+import json, time, sys
+path = sys.argv[1]
+stage = sys.argv[2]
+hash_value = sys.argv[3]
 try:
-    d = json.load(open(path))
-except:
+    with open(path) as f:
+        d = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
     d = {}
-d.setdefault('stages', {})
-d['stages']['$stage'] = {'hash': '$hash', 'timestamp': time.time()}
-with open(path, 'w') as f:
+d.setdefault("stages", {})
+d["stages"][stage] = {"hash": hash_value, "timestamp": time.time()}
+with open(path, "w") as f:
     json.dump(d, f, indent=2)
-" 2>/dev/null
+' "$CACHE_FILE" "$stage" "$hash" 2>/dev/null
     fi
 }
 
@@ -170,6 +216,8 @@ run_stage() {
 
     # Skip if not the requested stage
     if [[ -n "$ONLY_STAGE" && "$ONLY_STAGE" != "$name" ]]; then
+        echo -e "${CYAN}  ⏭ ${name}${RESET} ${DIM}(skipped — filtered by --stage=${ONLY_STAGE})${RESET}"
+        RESULTS+=("$name:skip:0")
         return 0
     fi
 
@@ -284,17 +332,19 @@ main() {
 
     if ! $failed; then
         run_stage "clippy" \
-            cargo clippy --workspace "${exclude_flags[@]}" --all-targets -- -D warnings \
+            cargo clippy --workspace "${exclude_flags[@]+"${exclude_flags[@]}"}" --all-targets -- -D warnings \
             || failed=true
     fi
 
     if ! $failed; then
-        local test_excludes=("${exclude_flags[@]}")
+        local test_excludes=("${exclude_flags[@]+"${exclude_flags[@]}"}")
         if ! $FFI_MODE; then
+            # mlx-conformance excluded locally (needs FFI); GH Actions CI also
+            # excludes mlx-sys but runs in a separate FFI job for conformance.
             test_excludes+=(--exclude mlx-conformance)
         fi
         run_stage "test" \
-            cargo test --workspace "${test_excludes[@]}" \
+            cargo test --workspace "${test_excludes[@]+"${test_excludes[@]}"}" \
             || failed=true
     fi
 
