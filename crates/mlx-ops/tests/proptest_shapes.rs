@@ -25,16 +25,19 @@ fn broadcastable_pair() -> impl Strategy<Value = (Shape, Shape)> {
     prop::collection::vec(dim(), 1..=4).prop_flat_map(|target| {
         let len = target.len();
         (
-            Just(target.clone()),
+            0..=len,
             prop::collection::vec(prop::bool::ANY, len),
+            Just(target),
         )
-            .prop_map(move |(t, masks)| {
-                let a_dims: Vec<i64> = t
+            .prop_map(|(skip, masks, t)| {
+                // Build `a` by taking a suffix of `t` (different rank) and masking some dims to 1.
+                // This exercises both rank-extension and per-dimension broadcasting behavior.
+                let a_dims: Vec<i64> = t[skip..]
                     .iter()
-                    .zip(masks.iter())
+                    .zip(masks[skip..].iter())
                     .map(|(&d, &keep)| if keep { d } else { 1 })
                     .collect();
-                (Shape::new(a_dims), Shape::new(t.clone()))
+                (Shape::new(a_dims), Shape::new(t))
             })
     })
 }
@@ -53,6 +56,19 @@ fn arb_dtype() -> impl Strategy<Value = DType> {
 /// Generate a 2D shape for matmul.
 fn matmul_shapes() -> impl Strategy<Value = (Shape, Shape)> {
     (dim(), dim(), dim()).prop_map(|(m, k, n)| (Shape::new(vec![m, k]), Shape::new(vec![k, n])))
+}
+
+/// Generate a shape and a valid axis for it (including negative indexing).
+fn shape_with_axis(rank: std::ops::RangeInclusive<usize>) -> impl Strategy<Value = (Shape, i32)> {
+    prop::collection::vec(dim(), rank).prop_flat_map(|dims| {
+        let ndim = dims.len() as i32;
+        let shape = Shape::new(dims);
+        (
+            Just(shape),
+            (0..ndim, prop::bool::ANY)
+                .prop_map(move |(axis, negative)| if negative { axis - ndim } else { axis }),
+        )
+    })
 }
 
 // ── Broadcasting property tests ──────────────────────────────────────────
@@ -165,9 +181,8 @@ proptest! {
 
     /// Sum(axis=0) removes exactly one dimension for rank >= 2.
     #[test]
-    fn sum_axis_removes_one_dim(dims in prop::collection::vec(dim(), 2..=4)) {
-        let shape = Shape::new(dims);
-        let result = infer_shape(&OpKind::Sum { axis: Some(0) }, &[&shape]).unwrap();
+    fn sum_axis_removes_one_dim((shape, axis) in shape_with_axis(2..=4)) {
+        let result = infer_shape(&OpKind::Sum { axis: Some(axis) }, &[&shape]).unwrap();
         prop_assert_eq!(result.ndim(), shape.ndim() - 1);
     }
 
@@ -190,9 +205,8 @@ proptest! {
 
     /// Softmax preserves shape for valid axis.
     #[test]
-    fn softmax_preserves_shape(dims in prop::collection::vec(dim(), 1..=4)) {
-        let shape = Shape::new(dims);
-        let result = infer_shape(&OpKind::Softmax { axis: 0 }, &[&shape]).unwrap();
+    fn softmax_preserves_shape((shape, axis) in shape_with_axis(1..=4)) {
+        let result = infer_shape(&OpKind::Softmax { axis }, &[&shape]).unwrap();
         prop_assert_eq!(result, shape);
     }
 }
@@ -212,11 +226,12 @@ proptest! {
         prop_assert_eq!(promote(a, a), a);
     }
 
-    /// Promotion result is at least as wide as either input.
+    /// Promotion result is an upper bound: promoting it with either input yields itself.
     #[test]
-    fn promote_at_least_as_wide(a in arb_dtype(), b in arb_dtype()) {
+    fn promote_is_upper_bound(a in arb_dtype(), b in arb_dtype()) {
         let result = promote(a, b);
-        prop_assert!(result.size_bytes() >= a.size_bytes().min(b.size_bytes()));
+        prop_assert_eq!(promote(result, a), result);
+        prop_assert_eq!(promote(result, b), result);
     }
 
     /// Promoting any type with F32 gives F32 (widest float).
