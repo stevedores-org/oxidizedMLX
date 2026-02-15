@@ -1,7 +1,12 @@
 //! Pure Rust CPU backend — correctness oracle for conformance testing.
 //!
-//! This backend implements tensor operations in safe Rust with no external
-//! dependencies. It is intentionally simple rather than fast, serving as the
-//! reference implementation against which FFI and Metal backends are validated.
+//! This crate re-exports the built-in CPU reference backend from `mlx-core`
+//! and will later provide optimized kernels (SIMD, rayon parallelism) as an
+//! upgrade path.
 
-// TODO(milestone-4): implement Backend trait + kernel dispatch
+pub use mlx_core::cpu_kernels::CpuRefBackend;
+
+/// Create a new [`mlx_core::backend::Stream`] backed by the CPU reference backend.
+pub fn cpu_stream() -> std::sync::Arc<mlx_core::backend::Stream> {
+    std::sync::Arc::new(mlx_core::backend::Stream::new(Box::new(CpuRefBackend)))
+}

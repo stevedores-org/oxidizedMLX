@@ -38,29 +38,47 @@ pub enum OpKind {
 
     // ── Elementwise ─────────────────────────────────────────────────────
     Add,
+    Sub,
     Mul,
+    Div,
     Neg,
 
     // ── Reductions ──────────────────────────────────────────────────────
-    Sum { axis: Option<i32> },
-    Mean { axis: Option<i32> },
-    Max { axis: Option<i32> },
+    Sum {
+        axis: Option<i32>,
+    },
+    Mean {
+        axis: Option<i32>,
+    },
+    Max {
+        axis: Option<i32>,
+    },
 
     // ── Linear algebra ──────────────────────────────────────────────────
     MatMul,
 
     // ── Shape manipulation ──────────────────────────────────────────────
-    Reshape { new_shape: Shape },
-    Transpose { axes: Option<Vec<usize>> },
+    Reshape {
+        new_shape: Shape,
+    },
+    Transpose {
+        axes: Option<Vec<usize>>,
+    },
 
     // ── Activations ─────────────────────────────────────────────────────
-    Softmax { axis: i32 },
+    Softmax {
+        axis: i32,
+    },
     Silu,
     Gelu,
 
     // ── Normalization ───────────────────────────────────────────────────
-    LayerNorm { eps: f32 },
-    RmsNorm { eps: f32 },
+    LayerNorm {
+        eps: f32,
+    },
+    RmsNorm {
+        eps: f32,
+    },
 }
 
 /// The computation graph arena.

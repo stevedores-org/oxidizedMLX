@@ -3,16 +3,26 @@
 //! `mlx-core` provides the foundational types (`Tensor`, `Device`, `DType`, `Shape`)
 //! and a backend-agnostic interface for lazy tensor computation.
 //!
+//! # Architecture
+//!
+//! Operations on tensors build a lazy computation graph. Calling `eval()` (or
+//! `to_vec_f32()`) triggers a topological walk that dispatches each node to the
+//! active `Backend`. A default CPU reference backend is provided out of the box.
+//!
 //! # Backends
 //!
+//! - Built-in CPU reference: simple, safe Rust — always available
 //! - `ffi` feature: delegates to the MLX C++ runtime via `mlx-sys`
-//! - CPU backend (future): pure Rust correctness oracle
-//! - Metal backend (future): native Apple Silicon acceleration
+//! - `mlx-cpu` crate: optimized pure-Rust CPU backend (future)
+//! - `mlx-metal` crate: native Apple Silicon acceleration (future)
 
+pub mod backend;
+pub mod cpu_kernels;
 pub mod graph;
 pub mod tensor;
 pub mod types;
 
+pub use graph::NodeId;
 pub use tensor::{Device, Tensor};
 pub use types::{DType, Shape};
 

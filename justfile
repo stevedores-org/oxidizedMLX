@@ -9,7 +9,8 @@ fmt:
 
 # Run clippy lints
 clippy:
-    cargo clippy --all-targets --all-features -- -D warnings
+    # Mirrors CI defaults (no FFI required)
+    cargo clippy --workspace --exclude mlx-sys --all-targets -- -D warnings
 
 # Run all tests (CPU-only, no FFI)
 test:
@@ -18,6 +19,10 @@ test:
 # Run tests including FFI (requires MLX_SRC)
 test-ffi:
     cargo test --workspace
+
+# Run clippy including FFI (requires MLX_SRC)
+clippy-ffi:
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Run conformance tests against Python MLX
 conformance:
@@ -37,3 +42,7 @@ proptest:
 # Run benchmarks
 bench:
     cargo bench -p mlx-cli
+
+# Create GitHub labels/milestones/epic issues for the delivery plan (idempotent).
+roadmap-bootstrap:
+    cargo run -p mlx-roadmap -- bootstrap
