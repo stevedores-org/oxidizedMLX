@@ -66,9 +66,7 @@ impl Stream {
             Some(&data),
         );
         let mut buffers = self.buffers.lock().unwrap();
-        if !buffers.contains_key(&id) {
-            buffers.insert(id, data);
-        }
+        buffers.entry(id).or_insert(data);
         id
     }
 

@@ -168,10 +168,9 @@ impl Graph {
             if matches!(op, OpKind::Constant) {
                 if let (Some(payload), Some(existing_payload)) =
                     (const_payload, self.const_payload(existing))
+                    && existing_payload == payload
                 {
-                    if existing_payload == payload {
-                        return existing;
-                    }
+                    return existing;
                 }
             } else {
                 return existing;
@@ -179,10 +178,10 @@ impl Graph {
         }
 
         let id = self.add_node_raw(op, inputs, meta);
-        if matches!(key.op_key, OpKey::Constant) {
-            if let Some(payload) = const_payload {
-                self.const_payloads.insert(id, payload.to_vec());
-            }
+        if matches!(key.op_key, OpKey::Constant)
+            && let Some(payload) = const_payload
+        {
+            self.const_payloads.insert(id, payload.to_vec());
         }
         self.cse.insert(key, id);
         id
@@ -273,6 +272,8 @@ enum OpKey {
     LayerNorm { eps_bits: u32 },
     RmsNorm { eps_bits: u32 },
     Broadcast { target_shape: Vec<i64> },
+    LayerNormVjp { eps_bits: u32 },
+    RmsNormVjp { eps_bits: u32 },
 }
 
 impl OpKey {
@@ -305,6 +306,12 @@ impl OpKey {
             OpKind::Broadcast { target_shape } => OpKey::Broadcast {
                 target_shape: target_shape.0.clone(),
             },
+            OpKind::LayerNormVjp { eps } => OpKey::LayerNormVjp {
+                eps_bits: eps.to_bits(),
+            },
+            OpKind::RmsNormVjp { eps } => OpKey::RmsNormVjp {
+                eps_bits: eps.to_bits(),
+            },
         }
     }
 }
@@ -331,10 +338,8 @@ pub fn hash_f32_payload(data: &[f32]) -> u64 {
 }
 
 fn normalize_inputs_for_cse(op: &OpKind, inputs: &mut SmallVec<[NodeId; 2]>) {
-    if matches!(op, OpKind::Add | OpKind::Mul) && inputs.len() == 2 {
-        if inputs[0].0 > inputs[1].0 {
-            inputs.swap(0, 1);
-        }
+    if matches!(op, OpKind::Add | OpKind::Mul) && inputs.len() == 2 && inputs[0].0 > inputs[1].0 {
+        inputs.swap(0, 1);
     }
 }
 
