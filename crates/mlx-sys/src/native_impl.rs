@@ -67,6 +67,25 @@ pub unsafe extern "C" fn mlxrs_default_device() -> *mut mlx_device_t {
     box_device(Device::default_device())
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_device_type(d: *mut mlx_device_t) -> crate::mlx_device_type_t {
+    let dev = unsafe { ref_device(d) };
+    match dev {
+        Device::Cpu => crate::mlx_device_type_t::CPU,
+        Device::Gpu => crate::mlx_device_type_t::GPU,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_cpu_device() -> *mut mlx_device_t {
+    box_device(Device::Cpu)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_gpu_device() -> *mut mlx_device_t {
+    box_device(Device::Gpu)
+}
+
 // ── Tensor creation ─────────────────────────────────────────────────────
 
 #[unsafe(no_mangle)]
@@ -304,7 +323,7 @@ pub unsafe extern "C" fn mlxrs_to_f32_vec(
                 return required_len as c_int;
             }
             if out_len < required_len {
-                return required_len as c_int; // buffer too small, return required length
+                return -2; // buffer too small
             }
             if required_len > 0 && out_ptr.is_null() {
                 return -1;
@@ -360,7 +379,7 @@ pub unsafe extern "C" fn mlxrs_shape(
     }
     unsafe { std::ptr::copy_nonoverlapping(dims.as_ptr(), out_ptr, copy_len) };
     if out_len < needed {
-        needed as c_int // signal that buffer was too small
+        -2 // buffer too small
     } else {
         0
     }

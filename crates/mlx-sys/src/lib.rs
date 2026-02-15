@@ -27,6 +27,14 @@ pub struct mlx_device_t {
     _private: [u8; 0],
 }
 
+/// Device types supported by the FFI layer.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum mlx_device_type_t {
+    CPU = 0,
+    GPU = 1,
+}
+
 /// Data types supported by the FFI layer.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +51,9 @@ pub enum mlx_dtype_t {
 #[cfg(feature = "ffi")]
 extern "C" {
     pub fn mlxrs_default_device() -> *mut mlx_device_t;
+    pub fn mlxrs_device_type(d: *mut mlx_device_t) -> mlx_device_type_t;
+    pub fn mlxrs_cpu_device() -> *mut mlx_device_t;
+    pub fn mlxrs_gpu_device() -> *mut mlx_device_t;
     pub fn mlxrs_zeros(
         device: *mut mlx_device_t,
         dtype: mlx_dtype_t,
@@ -129,6 +140,70 @@ mod tests {
             let rc = mlxrs_shape(t, out.as_mut_ptr(), ndim);
             assert_eq!(rc, 0, "mlxrs_shape failed");
             out
+        }
+    }
+
+    // ── Device discovery tests ────────────────────────────────────────
+
+    #[test]
+    fn test_default_device_returns_nonnull() {
+        unsafe {
+            let dev = mlxrs_default_device();
+            assert!(!dev.is_null());
+            mlxrs_free_device(dev);
+        }
+    }
+
+    #[test]
+    fn test_default_device_type_on_macos() {
+        unsafe {
+            let dev = mlxrs_default_device();
+            let dt = mlxrs_device_type(dev);
+            #[cfg(target_os = "macos")]
+            assert_eq!(
+                dt,
+                mlx_device_type_t::GPU,
+                "Apple Silicon should default to GPU"
+            );
+            #[cfg(not(target_os = "macos"))]
+            assert_eq!(
+                dt,
+                mlx_device_type_t::CPU,
+                "Non-macOS should default to CPU"
+            );
+            mlxrs_free_device(dev);
+        }
+    }
+
+    #[test]
+    fn test_cpu_device() {
+        unsafe {
+            let dev = mlxrs_cpu_device();
+            assert!(!dev.is_null());
+            assert_eq!(mlxrs_device_type(dev), mlx_device_type_t::CPU);
+            mlxrs_free_device(dev);
+        }
+    }
+
+    #[test]
+    fn test_gpu_device() {
+        unsafe {
+            let dev = mlxrs_gpu_device();
+            assert!(!dev.is_null());
+            assert_eq!(mlxrs_device_type(dev), mlx_device_type_t::GPU);
+            mlxrs_free_device(dev);
+        }
+    }
+
+    #[test]
+    fn test_device_lifecycle() {
+        // Allocate and free many devices to verify no leaks/crashes.
+        unsafe {
+            for _ in 0..1000 {
+                let d = mlxrs_default_device();
+                assert!(!d.is_null());
+                mlxrs_free_device(d);
+            }
         }
     }
 

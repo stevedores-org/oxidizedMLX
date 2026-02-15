@@ -206,7 +206,7 @@ impl Tensor {
             new_dims.push(1);
         }
         Ok(self.lazy_op(
-            OpKind::Sum { axis: Some(axis) },
+            OpKind::Sum { axis: Some(ax) },
             SmallVec::from_slice(&[self.node_id]),
             Shape::new(new_dims),
             self.dtype,
