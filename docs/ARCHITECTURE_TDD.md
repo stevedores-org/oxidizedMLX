@@ -91,7 +91,7 @@ The primary bottleneck is the fragmentation of the Metal runtime and the "Eager 
 1.  **Unified Buffer Abstraction:**
     -   Replace `Vec<f32>` in `Backend::eval_node` with a `Buffer` trait/enum.
     -   Support "Zero-copy" transfers between backends where possible (Shared Memory).
-    -   Enable `LazyBuffer` residency management (LRU cache for GPU memory).
+    -   Enable `LazyBuffer` residency management (keeping frequently-used buffers in GPU memory via an LRU cache).
 
 2.  **Metal Runtime Consolidation:**
     -   Unify the 6+ fragmented Metal PRs (#70, #71, #77, etc.) into a single cohesive runtime.

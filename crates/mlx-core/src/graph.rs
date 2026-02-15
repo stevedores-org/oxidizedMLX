@@ -44,6 +44,8 @@ pub enum OpKind {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
 
     // ── Reductions ──────────────────────────────────────────────────────
     Sum {
@@ -305,6 +307,8 @@ enum OpKey {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
     Sum {
         axis: Option<i32>,
     },
@@ -326,16 +330,42 @@ enum OpKey {
     },
     Silu,
     Gelu,
-    LayerNorm { eps_bits: u32 },
-    RmsNorm { eps_bits: u32 },
-    Broadcast { target_shape: Vec<i64> },
-    LayerNormVjp { eps_bits: u32 },
-    RmsNormVjp { eps_bits: u32 },
-    ScaledMaskedSoftmax { scale_bits: u32, causal: bool },
-    Attention { scale_bits: u32, causal: bool },
-    Rope { rotary_dim: usize, pos_offset: usize, theta_bits: u32 },
-    RoPE { base_bits: u32, offset: usize, traditional: bool },
-    SoftmaxVjp { axis: i32 },
+    LayerNorm {
+        eps_bits: u32,
+    },
+    RmsNorm {
+        eps_bits: u32,
+    },
+    Broadcast {
+        target_shape: Vec<i64>,
+    },
+    LayerNormVjp {
+        eps_bits: u32,
+    },
+    RmsNormVjp {
+        eps_bits: u32,
+    },
+    ScaledMaskedSoftmax {
+        scale_bits: u32,
+        causal: bool,
+    },
+    Attention {
+        scale_bits: u32,
+        causal: bool,
+    },
+    Rope {
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta_bits: u32,
+    },
+    RoPE {
+        base_bits: u32,
+        offset: usize,
+        traditional: bool,
+    },
+    SoftmaxVjp {
+        axis: i32,
+    },
     SiluVjp,
     GeluVjp,
     Sqrt,
@@ -351,6 +381,8 @@ impl OpKey {
             OpKind::Mul => OpKey::Mul,
             OpKind::Div => OpKey::Div,
             OpKind::Neg => OpKey::Neg,
+            OpKind::Exp => OpKey::Exp,
+            OpKind::Log => OpKey::Log,
             OpKind::Sum { axis } => OpKey::Sum { axis: *axis },
             OpKind::Mean { axis } => OpKey::Mean { axis: *axis },
             OpKind::Max { axis } => OpKey::Max { axis: *axis },
@@ -385,12 +417,20 @@ impl OpKey {
                 scale_bits: scale.to_bits(),
                 causal: *causal,
             },
-            OpKind::Rope { rotary_dim, pos_offset, theta } => OpKey::Rope {
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
+            } => OpKey::Rope {
                 rotary_dim: *rotary_dim,
                 pos_offset: *pos_offset,
                 theta_bits: theta.to_bits(),
             },
-            OpKind::RoPE { base, offset, traditional } => OpKey::RoPE {
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            } => OpKey::RoPE {
                 base_bits: base.to_bits(),
                 offset: *offset,
                 traditional: *traditional,
@@ -412,7 +452,10 @@ struct CseKey {
 }
 
 fn is_cse_eligible(op: &OpKind) -> bool {
-    !matches!(op, OpKind::Parameter)
+    // Constants and Parameters must never be deduplicated: two tensors with
+    // identical data may flow through different parts of the graph and receive
+    // independent gradients during backpropagation.
+    !matches!(op, OpKind::Constant | OpKind::Parameter)
 }
 
 pub fn hash_f32_payload(data: &[f32]) -> u64 {
@@ -473,7 +516,33 @@ mod tests {
     }
 
     #[test]
-    fn test_cse_dedups_constants_and_ops() {
+    fn test_cse_does_not_dedup_constants() {
+        let mut g = Graph::new();
+        let meta = TensorMeta {
+            shape: Shape::new(vec![2]),
+            dtype: DType::F32,
+        };
+        // Constants must NOT be deduplicated — they may receive independent
+        // gradients during backpropagation.
+        let a = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
+        let b = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
+        // Constants must NOT be deduplicated — they may receive independent gradients
+        assert_ne!(a, b);
+        assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn test_cse_dedups_ops() {
         let mut g = Graph::new();
         let meta = TensorMeta {
             shape: Shape::new(vec![2]),
@@ -489,10 +558,8 @@ mod tests {
             OpKind::Constant,
             SmallVec::new(),
             meta.clone(),
-            Some(&[1.0, 2.0]),
+            Some(&[3.0, 4.0]),
         );
-        assert_eq!(a, b);
-        assert_eq!(g.len(), 1);
 
         let add1 = g.intern_node(
             OpKind::Add,
@@ -507,6 +574,6 @@ mod tests {
             None,
         );
         assert_eq!(add1, add2);
-        assert_eq!(g.len(), 2);
+        assert_eq!(g.len(), 3); // 2 constants + 1 deduplicated add
     }
 }
