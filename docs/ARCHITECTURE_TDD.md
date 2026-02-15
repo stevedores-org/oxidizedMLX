@@ -73,11 +73,39 @@ Recommended early golden op coverage:
 - matmul
 - softmax
 
-## Migration Phases
+## Migration Status & Revised Plan (Ref: #87)
 
-- Phase 0: conformance harness
-- Phase 1: C ABI shim + `mlx-sys` + minimal safe API
-- Phase 2: Rust graph + lazy semantics, backend still FFI
-- Phase 3: CPU backend for CI correctness
-- Phase 4: autograd MVP
-- Phase 5: native Metal backend + hot kernels
+The project has transitioned from foundational API design to functional training. The revised roadmap focuses on memory efficiency and GPU performance.
+
+### ✅ Completed Milestones
+
+- **Phase 0-1 (Foundations):** `mlx-sys` C-ABI shim and `mlx-core` graph IR are stable.
+- **Phase 2-3 (Correctness):** `mlx-cpu` provides bit-wise parity for core ops; `mlx-conformance` runs automated tests against Python reference.
+- **Phase 4 (Autograd & NN):** `mlx-autograd` (VJP registry), `mlx-nn` (Module/Linear/LayerNorm), and `mlx-optim` (AdamW) are implemented and verified with a 5-step training convergence test.
+- **I/O:** `mlx-io` supports `.safetensors` weight loading/saving.
+
+### 🚧 Current Work: Phase 5 (Unified Eval & Metal Consolidation)
+
+The primary bottleneck is the fragmentation of the Metal runtime and the "Eager Host Copy" model in the `Backend` trait.
+
+1.  **Unified Buffer Abstraction:**
+    -   Replace `Vec<f32>` in `Backend::eval_node` with a `Buffer` trait/enum.
+    -   Support "Zero-copy" transfers between backends where possible (Shared Memory).
+    -   Enable `LazyBuffer` residency management (LRU cache for GPU memory).
+
+2.  **Metal Runtime Consolidation:**
+    -   Unify the 6+ fragmented Metal PRs (#70, #71, #77, etc.) into a single cohesive runtime.
+    -   Implement the `MetalBackend` using the new Unified Buffer abstraction to avoid host-roundtrips during `eval()`.
+    -   Prioritize `GEMM` (MatMul) and `Convolution` kernels.
+
+3.  **Graph Optimizations:**
+    -   Implement "Operator Fusion" (e.g., `Add` + `Mul` -> `FusedAddMul`).
+    -   Memory-efficient derivative calculation (gradient checkpointing).
+
+### 🚀 Future: Phase 6 (Productization & Scale)
+
+-   **Distributed Training:** Basic support for `AllReduce` via NCCL or custom shims.
+-   **Stable Diffusion / Llama Verification:** Running full-scale weights through the stack.
+-   **Python Bindings:** Exporting the Rust runtime back to Python for use as a high-performance backend.
+
+## Workspace Layout

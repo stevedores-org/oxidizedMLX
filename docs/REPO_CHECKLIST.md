@@ -4,88 +4,89 @@ This is a first-pass “what issues should exist” checklist aligned to the cur
 
 ## Milestones (suggested)
 
-### M0: Repo Baseline
+### M0: Repo Baseline ✅
 
 Issues:
 
-- [ ] Add top-level `README.md` and `docs/*` (delivery plan + checklist).
-- [ ] Ensure `just ci` passes on a fresh clone without `MLX_SRC`.
+- [x] Add top-level `README.md` and `docs/*` (delivery plan + checklist).
+- [x] Ensure `just ci` passes on a fresh clone without `MLX_SRC`.
 - [ ] Add `CONTRIBUTING.md` with dev workflows (optional).
 
-### M1: Backend Trait + Dispatch (“Narrow Waist”)
+### M1: Backend Trait + Dispatch (“Narrow Waist”) ✅
 
 Issues:
 
-- [ ] Define backend trait contract in `crates/mlx-core` (or a dedicated crate) including dtype/shape/device semantics.
-- [ ] Route a minimal op set through backend dispatch: add/mul/matmul/sum.
-- [ ] Add backend selection at tensor creation time.
+- [x] Define backend trait contract in `crates/mlx-core` (or a dedicated crate) including dtype/shape/device semantics.
+- [x] Route a minimal op set through backend dispatch: add/mul/matmul/sum.
+- [x] Add backend selection at tensor creation time.
 
-### M2: Core Tensor API Stabilization
-
-Issues:
-
-- [ ] Consolidate error types (`thiserror`) and enforce invariants (rank checks, dtype checks).
-- [ ] Define dtype policy (f16/bf16/f32/f64/i32/i64/bool) and conversions.
-- [ ] Add property tests for broadcasting + shape rules (proptest).
-
-### M3: Ops Coverage (Pure Ops Layer)
+### M2: Core Tensor API Stabilization ✅
 
 Issues:
 
-- [ ] Elementwise: add/sub/mul/div/neg/exp/log/tanh/relu-ish.
-- [ ] Reductions: sum/mean/max/min with axis handling.
-- [ ] Matmul and basic linear algebra utilities.
+- [x] Consolidate error types (`thiserror`) and enforce invariants (rank checks, dtype checks).
+- [x] Define dtype policy (f16/bf16/f32/f64/i32/i64/bool) and conversions.
+- [x] Add property tests for broadcasting + shape rules (proptest).
 
-### M4: CPU Backend (Reference Kernels)
+### M3: Ops Coverage (Pure Ops Layer) ✅
+
+Issues:
+
+- [x] Elementwise: add/sub/mul/div/neg/exp/log/tanh/relu-ish.
+- [x] Reductions: sum/mean/max/min with axis handling.
+- [x] Matmul and basic linear algebra utilities.
+
+### M4: CPU Backend (Reference Kernels) ✅
 
 Sources: `crates/mlx-cpu/src/lib.rs` has `TODO(milestone-4)`.
 
 Issues:
 
-- [ ] Implement backend trait for CPU: tensor storage, strides, basic kernels.
-- [ ] Implement broadcast + elementwise kernels.
-- [ ] Implement matmul kernel (naive first), plus test vectors.
-- [ ] Add deterministic RNG policy for tests (seeded).
+- [x] Implement backend trait for CPU: tensor storage, strides, basic kernels.
+- [x] Implement broadcast + elementwise kernels.
+- [x] Implement matmul kernel (naive first), plus test vectors.
+- [x] Add deterministic RNG policy for tests (seeded).
 
-### M5: Autograd (Reverse-Mode)
+### M5: Autograd (Reverse-Mode) ✅
 
 Sources: `crates/mlx-autograd/src/lib.rs` has `TODO(milestone-5)`.
 
 Issues:
 
-- [ ] Define tape/graph representation and gradient accumulation policy.
-- [ ] Add VJP registry for core ops (matmul, sum, add, mul).
-- [ ] Gradient correctness tests (finite differences where feasible).
+- [x] Define tape/graph representation and gradient accumulation policy.
+- [x] Add VJP registry for core ops (matmul, sum, add, mul).
+- [x] Gradient correctness tests (finite differences where feasible).
 
-### M6: Metal Backend Scaffolding
+### M6: Metal Backend Scaffolding 🚧
 
 Sources: `crates/mlx-metal/src/lib.rs` has `TODO(milestone-6)`.
 
 Issues:
 
-- [ ] Add Metal runtime scaffolding: device/queue/buffer abstractions.
+- [ ] Consolidate the 6+ fragmented Metal PRs into a single runtime.
+- [x] Add Metal runtime scaffolding: device/queue/buffer abstractions (initial version).
 - [ ] Implement one op end-to-end on Metal with conformance vs CPU.
-- [ ] Add a feature flag `metal` and guard macOS-only code.
+- [x] Add a feature flag `metal` and guard macOS-only code.
 
-### M7: Conformance Harness (Rust vs Python MLX)
+### M7: Conformance Harness (Rust vs Python MLX) ✅
 
 Issues:
 
-- [ ] Define a conformance test spec (ops, shapes, dtypes, tolerances).
-- [ ] Implement harness in `crates/mlx-conformance` that runs Python MLX and compares.
-- [ ] Add a report format that includes repro inputs and expected/got deltas.
+- [x] Define a conformance test spec (ops, shapes, dtypes, tolerances).
+- [x] Implement harness in `crates/mlx-conformance` that runs Python MLX and compares.
+- [x] Add a report format that includes repro inputs and expected/got deltas.
 
-### M8: FFI Backend (Upstream MLX via C ABI)
+### M8: FFI Backend (Upstream MLX via C ABI) ✅
 
 Sources: `crates/mlx-sys/build.rs` uses `MLX_SRC` and builds a static `mlxrs_capi`.
 
 Issues:
 
-- [ ] Document and version the C ABI surface (functions + types) in the shim.
-- [ ] Add an `ffi` feature and an FFI backend implementation behind the backend trait.
-- [ ] Add a CI job that runs FFI builds behind an opt-in workflow (or required secrets/checkout).
+- [x] Document and version the C ABI surface (functions + types) in the shim.
+- [x] Add an `ffi` feature and an FFI backend implementation behind the backend trait.
+- [x] Add a CI job that runs FFI builds behind an opt-in workflow.
 
-### M9: NN / Optim / IO
+### M9: NN / Optim / IO ✅
 
 Sources:
 
@@ -95,9 +96,17 @@ Sources:
 
 Issues:
 
-- [ ] Implement module/parameter system and state dict conventions (`mlx-nn`).
-- [ ] Implement SGD + AdamW + schedulers (`mlx-optim`).
-- [ ] Implement safetensors + mmap loader (`mlx-io`) with validation and tests.
+- [x] Implement module/parameter system and state dict conventions (`mlx-nn`).
+- [x] Implement SGD + AdamW + schedulers (`mlx-optim`).
+- [x] Implement safetensors + mmap loader (`mlx-io`) with validation and tests.
+
+### M10: Unified Buffer Abstraction (Efficiency) 🚧
+
+Issues:
+
+- [ ] Introduce `Buffer` trait/enum to `mlx-core` to replace `Vec<f32>` in eval.
+- [ ] Implement lazy buffer materialization (eval once, reuse).
+- [ ] Add zero-copy support for `mlx-ffi-backend`.
 
 ## Labels (suggested)
 
