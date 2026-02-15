@@ -44,4 +44,10 @@ pub enum MlxError {
 
     #[error("Backend not available: {0}")]
     BackendUnavailable(&'static str),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Serialization error: {0}")]
+    Serialization(String),
 }

@@ -76,7 +76,26 @@ impl Tensor {
         Self::from_data(data.to_vec(), shape, DType::F32, device)
     }
 
-    fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
+    /// Create a tensor from a Vec<f32>.
+    pub fn from_vec(data: Vec<f32>, shape: &Shape, device: &Device) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        Self::from_data(data, shape, DType::F32, device)
+    }
+
+    pub(crate) fn from_data(
+        data: Vec<f32>,
+        shape: &Shape,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
         let stream = default_stream();
         let meta = TensorMeta {
             shape: shape.clone(),

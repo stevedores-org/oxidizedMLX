@@ -7,3 +7,8 @@ description = "Tensor serialization: safetensors, GGUF, mmap loading"
 
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+safetensors = "0.4"
+memmap2 = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
