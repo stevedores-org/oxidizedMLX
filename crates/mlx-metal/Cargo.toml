@@ -5,8 +5,15 @@ edition.workspace = true
 license.workspace = true
 description = "Native Metal backend for Apple Silicon GPU acceleration"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+tracing = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# metal-rs and objc2 will be added when Metal backend is implemented
+metal = "0.30"
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
