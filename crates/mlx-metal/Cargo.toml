@@ -9,4 +9,8 @@ description = "Native Metal backend for Apple Silicon GPU acceleration"
 mlx-core = { path = "../mlx-core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# metal-rs and objc2 will be added when Metal backend is implemented
+metal = "0.31"
+objc = "0.2"
+
+[dev-dependencies]
+smallvec = "1"
