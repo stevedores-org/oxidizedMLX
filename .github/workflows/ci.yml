@@ -48,3 +48,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --exclude mlx-sys
+
+  valgrind:
+    name: Valgrind (C ABI Lifecycle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+      - name: Build mlx-cli
+        run: cargo build -p mlx-cli
+      - name: Run cabi-smoke under valgrind (fail on definite leaks)
+        run: |
+          valgrind \
+            --error-exitcode=1 \
+            --leak-check=full \
+            --errors-for-leak-kinds=definite,indirect \
+            --show-leak-kinds=definite,indirect \
+            target/debug/mlx-cli cabi-smoke --iters 2000

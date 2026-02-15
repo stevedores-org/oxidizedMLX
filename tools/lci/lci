@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# lci — Local CI runner for oxidizedMLX
+#
+# Mirrors the GitHub Actions CI pipeline locally with file-hash caching.
+# Stages that haven't changed since the last successful run are skipped.
+#
+# Usage:
+#   make lci                     # recommended — cached local CI
+#   ./tools/lci/lci              # run all stages (fmt, clippy, test)
+#   ./tools/lci/lci --no-cache   # force all stages to run
+#   ./tools/lci/lci --stage fmt  # run only the fmt stage
+#   ./tools/lci/lci --ffi        # include mlx-sys (requires MLX_SRC)
+#
+# Ported from lornu.ai/tools/lci (Go).
+
+set -euo pipefail
+
+# ── Colors ──────────────────────────────────────────────────────────────
+
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+RESET='\033[0m'
+
+# Disable colors if not a terminal
+if [[ ! -t 1 ]]; then
+    BOLD="" DIM="" GREEN="" RED="" YELLOW="" CYAN="" RESET=""
+fi
+
+# ── Portable sha256 wrapper ─────────────────────────────────────────────
+
+sha256() {
+    if command -v sha256sum &>/dev/null; then
+        sha256sum
+    else
+        shasum -a 256
+    fi
+}
+
+# ── Workspace root detection ────────────────────────────────────────────
+
+find_workspace_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/Cargo.toml" ]] && grep -q '^\[workspace\]' "$dir/Cargo.toml" 2>/dev/null; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "Error: not inside a Cargo workspace" >&2
+    return 1
+}
+
+WORKSPACE_ROOT="$(find_workspace_root)"
+CACHE_FILE="$WORKSPACE_ROOT/.lci-cache.json"
+
+VALID_STAGES="fmt clippy test"
+
+# ── CLI flags ───────────────────────────────────────────────────────────
+
+USE_CACHE=true
+FFI_MODE=false
+ONLY_STAGE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-cache)  USE_CACHE=false; shift ;;
+        --ffi)       FFI_MODE=true; shift ;;
+        --stage)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --stage requires an argument (${VALID_STAGES// /, })" >&2
+                exit 1
+            fi
+            case "$2" in
+                fmt|clippy|test)
+                    ONLY_STAGE="$2"
+                    ;;
+                *)
+                    echo "Error: invalid stage '$2'" >&2
+                    echo "Valid stages are: ${VALID_STAGES// /, }" >&2
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: lci [--no-cache] [--ffi] [--stage STAGE]"
+            echo ""
+            echo "Stages: ${VALID_STAGES// /, }"
+            echo ""
+            echo "Options:"
+            echo "  --no-cache   Force all stages to run"
+            echo "  --ffi        Include mlx-sys (requires MLX_SRC)"
+            echo "  --stage S    Run only stage S"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ── Source hash (git fast path) ─────────────────────────────────────────
+
+compute_source_hash() {
+    cd "$WORKSPACE_ROOT"
+    # Fast path: use git if available and in a repo
+    if git rev-parse --is-inside-work-tree &>/dev/null; then
+        # Hash of: committed tree (HEAD) + staged/unstaged changes + untracked files.
+        # Also includes the lci script and CI workflow so cache invalidates on CI changes.
+        local tree_hash
+        tree_hash="$(git rev-parse HEAD^{tree} 2>/dev/null || echo "")"
+        local diff_hash
+        diff_hash="$(git diff --no-ext-diff HEAD -- ':(glob)**/*.rs' ':(glob)**/*.toml' \
+            '.github/workflows/ci.yml' 'tools/lci/lci' 2>/dev/null | sha256 | cut -d' ' -f1)"
+        local untracked_hash
+        untracked_hash="$(git ls-files --others --exclude-standard -z -- '*.rs' '*.toml' 2>/dev/null \
+            | xargs -0 sha256 2>/dev/null \
+            | sha256 \
+            | cut -d' ' -f1)"
+        echo "${tree_hash}:${diff_hash}:${untracked_hash}" | sha256 | cut -d' ' -f1
+    else
+        # Fallback: hash all .rs and .toml files, plus CI config and lci script
+        {
+            find . -path '*/target' -prune -o \( -name '*.rs' -o -name '*.toml' \) -print0
+            [[ -f ".github/workflows/ci.yml" ]] && printf '%s\0' ".github/workflows/ci.yml"
+            [[ -f "tools/lci/lci" ]] && printf '%s\0' "tools/lci/lci"
+        } | sort -z \
+          | xargs -0 sha256 2>/dev/null \
+          | sha256 \
+          | cut -d' ' -f1
+    fi
+}
+
+# ── Cache management ────────────────────────────────────────────────────
+
+load_cached_hash() {
+    local stage="$1"
+    if [[ -f "$CACHE_FILE" ]] && command -v python3 &>/dev/null; then
+        python3 -c '
+import json, sys
+path = sys.argv[1]
+stage = sys.argv[2]
+try:
+    with open(path) as f:
+        d = json.load(f)
+    print(d.get("stages", {}).get(stage, {}).get("hash", ""))
+except (json.JSONDecodeError, FileNotFoundError, KeyError):
+    pass
+' "$CACHE_FILE" "$stage" 2>/dev/null
+    fi
+}
+
+save_cache() {
+    local stage="$1" hash="$2"
+    if command -v python3 &>/dev/null; then
+        python3 -c '
+import json, time, sys
+path = sys.argv[1]
+stage = sys.argv[2]
+hash_value = sys.argv[3]
+try:
+    with open(path) as f:
+        d = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    d = {}
+d.setdefault("stages", {})
+d["stages"][stage] = {"hash": hash_value, "timestamp": time.time()}
+with open(path, "w") as f:
+    json.dump(d, f, indent=2)
+' "$CACHE_FILE" "$stage" "$hash" 2>/dev/null
+    fi
+}
+
+# ── Environment checks ─────────────────────────────────────────────────
+
+check_env() {
+    local warnings=()
+
+    if ! command -v cargo &>/dev/null; then
+        echo -e "${RED}Error: cargo not found. Install Rust: https://rustup.rs${RESET}" >&2
+        exit 1
+    fi
+
+    if command -v sccache &>/dev/null; then
+        export RUSTC_WRAPPER=sccache
+        echo -e "  ${DIM}sccache: enabled${RESET}"
+    else
+        warnings+=("sccache not found — builds will be slower")
+    fi
+
+    if $FFI_MODE && [[ -z "${MLX_SRC:-}" ]]; then
+        echo -e "${RED}Error: --ffi requires MLX_SRC environment variable${RESET}" >&2
+        exit 1
+    fi
+
+    for w in "${warnings[@]+"${warnings[@]}"}"; do
+        echo -e "  ${YELLOW}⚠ $w${RESET}"
+    done
+}
+
+# ── Stage runner ────────────────────────────────────────────────────────
+
+# Results array: stage_name:status:duration_ms
+declare -a RESULTS=()
+
+run_stage() {
+    local name="$1"
+    shift
+    local cmd=("$@")
+
+    # Skip if not the requested stage
+    if [[ -n "$ONLY_STAGE" && "$ONLY_STAGE" != "$name" ]]; then
+        echo -e "${CYAN}  ⏭ ${name}${RESET} ${DIM}(skipped — filtered by --stage=${ONLY_STAGE})${RESET}"
+        RESULTS+=("$name:skip:0")
+        return 0
+    fi
+
+    local current_hash
+    current_hash="$(compute_source_hash)"
+
+    # Check cache
+    if $USE_CACHE; then
+        local cached_hash
+        cached_hash="$(load_cached_hash "$name")"
+        if [[ -n "$cached_hash" && "$cached_hash" == "$current_hash" ]]; then
+            echo -e "${CYAN}  ⏭ ${name}${RESET} ${DIM}(cached — no changes)${RESET}"
+            RESULTS+=("$name:skip:0")
+            return 0
+        fi
+    fi
+
+    echo -ne "${BOLD}  ▶ ${name}${RESET} "
+
+    local start_ms
+    start_ms=$(perl -MTime::HiRes=time -e 'printf "%d", time()*1000' 2>/dev/null || date +%s000)
+
+    local log_file
+    log_file=$(mktemp)
+
+    if "${cmd[@]}" >"$log_file" 2>&1; then
+        local end_ms
+        end_ms=$(perl -MTime::HiRes=time -e 'printf "%d", time()*1000' 2>/dev/null || date +%s000)
+        local dur_ms=$(( end_ms - start_ms ))
+        echo -e "${GREEN}✓${RESET} ${DIM}(${dur_ms}ms)${RESET}"
+        RESULTS+=("$name:pass:$dur_ms")
+        # Update cache on success
+        save_cache "$name" "$current_hash"
+    else
+        local end_ms
+        end_ms=$(perl -MTime::HiRes=time -e 'printf "%d", time()*1000' 2>/dev/null || date +%s000)
+        local dur_ms=$(( end_ms - start_ms ))
+        echo -e "${RED}✗${RESET} ${DIM}(${dur_ms}ms)${RESET}"
+        echo ""
+        cat "$log_file"
+        RESULTS+=("$name:fail:$dur_ms")
+        rm -f "$log_file"
+        return 1
+    fi
+
+    rm -f "$log_file"
+}
+
+# ── Summary table ───────────────────────────────────────────────────────
+
+print_summary() {
+    echo ""
+    echo -e "${BOLD}  ┌─────────────┬────────┬───────────┐${RESET}"
+    echo -e "${BOLD}  │ Stage       │ Status │ Duration  │${RESET}"
+    echo -e "${BOLD}  ├─────────────┼────────┼───────────┤${RESET}"
+
+    local any_fail=false
+    for entry in "${RESULTS[@]}"; do
+        IFS=':' read -r name status dur <<< "$entry"
+        local status_str dur_str
+
+        case "$status" in
+            pass) status_str="${GREEN}PASS${RESET}"   ;;
+            fail) status_str="${RED}FAIL${RESET}"; any_fail=true ;;
+            skip) status_str="${YELLOW}SKIP${RESET}"  ;;
+        esac
+
+        if [[ "$dur" -eq 0 ]]; then
+            dur_str="—"
+        elif [[ "$dur" -lt 1000 ]]; then
+            dur_str="${dur}ms"
+        else
+            dur_str="$(( dur / 1000 )).$(( (dur % 1000) / 100 ))s"
+        fi
+
+        printf "  │ %-11s │ %b │ %9s │\n" "$name" "$status_str" "$dur_str"
+    done
+
+    echo -e "${BOLD}  └─────────────┴────────┴───────────┘${RESET}"
+    echo ""
+
+    if $any_fail; then
+        echo -e "  ${RED}${BOLD}Local CI failed.${RESET}"
+        return 1
+    else
+        echo -e "  ${GREEN}${BOLD}Local CI passed.${RESET}"
+    fi
+}
+
+# ── Main ────────────────────────────────────────────────────────────────
+
+main() {
+    echo ""
+    echo -e "${BOLD}  oxidizedMLX Local CI${RESET}"
+    echo -e "  ${DIM}─────────────────────${RESET}"
+
+    check_env
+
+    echo ""
+
+    # Build exclude flags
+    local exclude_flags=()
+    if ! $FFI_MODE; then
+        exclude_flags+=(--exclude mlx-sys)
+    fi
+
+    local failed=false
+
+    run_stage "fmt" \
+        cargo fmt --all --check \
+        || failed=true
+
+    if ! $failed; then
+        run_stage "clippy" \
+            cargo clippy --workspace "${exclude_flags[@]+"${exclude_flags[@]}"}" --all-targets -- -D warnings \
+            || failed=true
+    fi
+
+    if ! $failed; then
+        local test_excludes=("${exclude_flags[@]+"${exclude_flags[@]}"}")
+        if ! $FFI_MODE; then
+            # mlx-conformance excluded locally (needs FFI); GH Actions CI also
+            # excludes mlx-sys but runs in a separate FFI job for conformance.
+            test_excludes+=(--exclude mlx-conformance)
+        fi
+        run_stage "test" \
+            cargo test --workspace "${test_excludes[@]+"${test_excludes[@]}"}" \
+            || failed=true
+    fi
+
+    print_summary || exit 1
+
+    if $failed; then
+        exit 1
+    fi
+}
+
+main

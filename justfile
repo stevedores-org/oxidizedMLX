@@ -18,11 +18,11 @@ test:
 
 # Run tests including FFI (requires MLX_SRC)
 test-ffi:
-    cargo test --workspace
+    cargo test -p mlx-sys --features ffi
 
 # Run clippy including FFI (requires MLX_SRC)
 clippy-ffi:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy -p mlx-sys --features ffi --all-targets -- -D warnings
 
 # Run conformance tests against Python MLX
 conformance:

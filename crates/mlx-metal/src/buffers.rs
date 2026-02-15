@@ -1,12 +1,12 @@
 //! Shared buffer allocation and mapping helpers.
 
 use metal::{Buffer, MTLResourceOptions};
-use mlx_core::{MlxError, Result};
 use std::marker::PhantomData;
 use std::mem;
 use std::ptr;
 
 use crate::context::MetalContext;
+use crate::{MetalError, Result};
 
 /// Typed Metal buffer wrapper.
 #[derive(Clone)]
@@ -22,7 +22,7 @@ impl<T: Copy> MetalBuffer<T> {
         let len = data.len();
         let byte_len = len
             .checked_mul(mem::size_of::<T>())
-            .ok_or_else(|| MlxError::InvalidArgument("buffer size overflow".to_string()))?;
+            .ok_or_else(|| MetalError::InvalidArgument("buffer size overflow".to_string()))?;
 
         let raw = ctx
             .device()
@@ -31,7 +31,7 @@ impl<T: Copy> MetalBuffer<T> {
         unsafe {
             let dst = raw.contents() as *mut T;
             if dst.is_null() {
-                return Err(MlxError::InvalidArgument(
+                return Err(MetalError::InvalidArgument(
                     "Metal buffer contents pointer was null".to_string(),
                 ));
             }
@@ -48,7 +48,7 @@ impl<T: Copy> MetalBuffer<T> {
     pub(crate) fn new_shared_uninitialized(ctx: &MetalContext, len: usize) -> Result<Self> {
         let byte_len = len
             .checked_mul(mem::size_of::<T>())
-            .ok_or_else(|| MlxError::InvalidArgument("buffer size overflow".to_string()))?;
+            .ok_or_else(|| MetalError::InvalidArgument("buffer size overflow".to_string()))?;
 
         let raw = ctx
             .device()

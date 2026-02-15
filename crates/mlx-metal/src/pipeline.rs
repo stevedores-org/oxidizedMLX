@@ -1,9 +1,10 @@
 //! Metal library compilation and compute pipeline cache.
 
 use metal::{CompileOptions, ComputePipelineState, Device, Library};
-use mlx_core::{MlxError, Result};
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use crate::{MetalError, Result};
 
 const ADD_U32_NAME: &str = "add_u32";
 
@@ -39,12 +40,12 @@ impl PipelineCache {
         let library = compile_library(device, source)?;
         let function = library
             .get_function(key, None)
-            .map_err(|e| MlxError::InvalidArgument(format!("failed to get function {key}: {e}")))?;
+            .map_err(|e| MetalError::InvalidArgument(format!("failed to get function {key}: {e}")))?;
 
         let pipeline = device
             .new_compute_pipeline_state_with_function(&function)
             .map_err(|e| {
-                MlxError::InvalidArgument(format!("failed to build pipeline {key}: {e}"))
+                MetalError::InvalidArgument(format!("failed to build pipeline {key}: {e}"))
             })?;
 
         self.cache
@@ -60,5 +61,5 @@ fn compile_library(device: &Device, source: &str) -> Result<Library> {
     let options = CompileOptions::new();
     device
         .new_library_with_source(source, &options)
-        .map_err(|e| MlxError::InvalidArgument(format!("failed to compile Metal library: {e}")))
+        .map_err(|e| MetalError::InvalidArgument(format!("failed to compile Metal library: {e}")))
 }

@@ -10,11 +10,19 @@ crate-type = ["rlib"]
 
 [dependencies]
 libc.workspace = true
+mlx-core = { path = "../mlx-core", optional = true }
 
 [build-dependencies]
-cmake = "0.1"
+cmake = { version = "0.1", optional = true }
 bindgen = { version = "0.71", optional = true }
 
+[dev-dependencies]
+mlx-conformance = { path = "../mlx-conformance" }
+
 [features]
-default = []
+default = ["native"]
+native = ["dep:mlx-core"]
+ffi = ["dep:cmake"]
+# Backward-compat alias (older docs/code used `cpp` for the external backend).
+cpp = ["ffi"]
 bindgen = ["dep:bindgen"]

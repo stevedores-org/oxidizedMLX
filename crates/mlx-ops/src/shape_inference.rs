@@ -100,6 +100,9 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         // Reshape: output shape is specified in the op.
         OpKind::Reshape { new_shape } => Ok(new_shape.clone()),
 
+        // Broadcast: output shape is the target shape.
+        OpKind::Broadcast { target_shape } => Ok(target_shape.clone()),
+
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
             let a = inputs

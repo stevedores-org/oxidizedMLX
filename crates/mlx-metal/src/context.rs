@@ -1,12 +1,13 @@
 //! Metal device and command queue context.
 
 use metal::{CommandQueue, Device};
-use mlx_core::{MlxError, Result};
 use std::sync::Arc;
 use tracing::info;
 
 use crate::command::run_add_u32_impl;
 use crate::pipeline::PipelineCache;
+use crate::unified::{HostAllocation, UnifiedBuffer};
+use crate::{MetalError, Result};
 
 /// Shared Metal context: device + command queue.
 #[derive(Clone)]
@@ -20,7 +21,7 @@ impl MetalContext {
     /// Create a new Metal context using the system default device.
     pub fn new() -> Result<Self> {
         let device = Device::system_default()
-            .ok_or(MlxError::BackendUnavailable("Metal device not available"))?;
+            .ok_or(MetalError::NoDevice)?;
         let queue = device.new_command_queue();
         info!(device = %device.name(), "Initialized Metal context");
         Ok(Self {
@@ -40,11 +41,27 @@ impl MetalContext {
         run_add_u32_impl(self, a, b)
     }
 
-    pub(crate) fn device(&self) -> &Device {
+    /// Create a zero-copy buffer from a page-aligned host allocation.
+    pub fn buffer_from_host_no_copy<T: Copy + Send + Sync>(
+        &self,
+        host: HostAllocation<T>,
+    ) -> Result<UnifiedBuffer<T>> {
+        UnifiedBuffer::from_host_no_copy(&self.device, host)
+    }
+
+    /// Create a Metal-owned shared buffer with `len` uninitialised elements.
+    pub fn buffer_shared_uninitialized<T: Copy + Send + Sync>(
+        &self,
+        len: usize,
+    ) -> Result<UnifiedBuffer<T>> {
+        UnifiedBuffer::shared_uninitialized(&self.device, len)
+    }
+
+    pub fn device(&self) -> &Device {
         &self.device
     }
 
-    pub(crate) fn queue(&self) -> &CommandQueue {
+    pub fn queue(&self) -> &CommandQueue {
         &self.queue
     }
 
