@@ -53,6 +53,19 @@ fn arb_dtype() -> impl Strategy<Value = DType> {
     ]
 }
 
+/// Numeric priority for dtype promotion (higher = wider).
+///
+/// Keep in sync with `crates/mlx-ops/src/dtype_promotion.rs`.
+fn dtype_priority(dt: DType) -> u8 {
+    match dt {
+        DType::I32 => 1,
+        DType::I64 => 2,
+        DType::F16 => 3,
+        DType::BF16 => 4,
+        DType::F32 => 5,
+    }
+}
+
 /// Generate a 2D shape for matmul.
 fn matmul_shapes() -> impl Strategy<Value = (Shape, Shape)> {
     (dim(), dim(), dim()).prop_map(|(m, k, n)| (Shape::new(vec![m, k]), Shape::new(vec![k, n])))
@@ -218,6 +231,13 @@ proptest! {
     #[test]
     fn promote_commutative(a in arb_dtype(), b in arb_dtype()) {
         prop_assert_eq!(promote(a, b), promote(b, a));
+    }
+
+    /// Promotion is at least as wide as both inputs (by promotion priority, not by byte width).
+    #[test]
+    fn promote_at_least_as_wide(a in arb_dtype(), b in arb_dtype()) {
+        let result = promote(a, b);
+        prop_assert!(dtype_priority(result) >= dtype_priority(a).max(dtype_priority(b)));
     }
 
     /// Promoting a dtype with itself returns the same dtype.
