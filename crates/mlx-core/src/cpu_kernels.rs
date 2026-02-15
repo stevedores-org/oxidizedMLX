@@ -29,6 +29,14 @@ impl Backend for CpuRefBackend {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.iter().map(|x| -x).collect())
             }
+            OpKind::Exp => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.exp()).collect())
+            }
+            OpKind::Log => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.ln()).collect())
+            }
             OpKind::Sum { axis } => reduce_sum(inputs, *axis),
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
@@ -59,8 +67,24 @@ impl Backend for CpuRefBackend {
             OpKind::LayerNorm { eps } => layer_norm(inputs, *eps, output_meta),
             OpKind::RmsNorm { eps } => rms_norm(inputs, *eps, output_meta),
             OpKind::Broadcast { target_shape } => broadcast(inputs, target_shape),
+            OpKind::ScaledMaskedSoftmax { scale, causal } => {
+                scaled_masked_softmax(inputs, *scale, *causal)
+            }
+            OpKind::Attention { scale, causal } => cpu_attention(inputs, *scale, *causal),
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
+            } => cpu_rope(inputs, output_meta, *rotary_dim, *pos_offset, *theta),
             OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
             OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
+            OpKind::SoftmaxVjp { axis } => softmax_vjp(inputs, *axis),
+            OpKind::SiluVjp => silu_vjp(inputs),
+            OpKind::GeluVjp => gelu_vjp(inputs),
+            OpKind::Sqrt => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|&x| x.sqrt()).collect())
+            }
             OpKind::RoPE {
                 base,
                 offset,
@@ -457,6 +481,141 @@ fn rms_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
     Ok(result)
 }
 
+/// Softmax backward: inputs = [grad_output, softmax_output].
+///
+/// dx_i = s_i * (dy_i - sum(dy * s))
+fn softmax_vjp(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let s = require_input(inputs, 1)?;
+    if dy.data.len() != s.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: s.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    let ndim = s.shape.ndim() as i32;
+    let ax = if axis < 0 { ndim + axis } else { axis };
+    if ax < 0 || ax >= ndim {
+        return Err(MlxError::InvalidArgument(format!(
+            "axis {axis} out of range for ndim {ndim}"
+        )));
+    }
+    let ax = ax as usize;
+
+    let outer: usize = s.shape.0[..ax].iter().product::<i64>() as usize;
+    let dim: usize = s.shape.0[ax] as usize;
+    let inner: usize = s.shape.0[ax + 1..].iter().product::<i64>() as usize;
+
+    let mut result = vec![0.0f32; s.data.len()];
+    for o in 0..outer {
+        for i in 0..inner {
+            // dot = sum(dy * s) along the axis
+            let mut dot = 0.0f32;
+            for d in 0..dim {
+                let idx = o * dim * inner + d * inner + i;
+                dot += dy.data[idx] * s.data[idx];
+            }
+            for d in 0..dim {
+                let idx = o * dim * inner + d * inner + i;
+                result[idx] = s.data[idx] * (dy.data[idx] - dot);
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// SiLU backward: inputs = [grad_output, original_input].
+///
+/// d_silu/dx = σ(x) * (1 + x * (1 - σ(x)))
+fn silu_vjp(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let x = require_input(inputs, 1)?;
+    if dy.data.len() != x.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: x.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    Ok(dy
+        .data
+        .iter()
+        .zip(x.data.iter())
+        .map(|(&dy_i, &x_i)| {
+            let sig = sigmoid(x_i);
+            dy_i * sig * (1.0 + x_i * (1.0 - sig))
+        })
+        .collect())
+}
+
+/// GELU backward (tanh approximation): inputs = [grad_output, original_input].
+///
+/// gelu(x) = 0.5x(1 + tanh(a(x + bx³)))
+/// d_gelu/dx = 0.5(1 + tanh(...)) + 0.5x * sech²(...) * a(1 + 3bx²)
+fn gelu_vjp(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let x = require_input(inputs, 1)?;
+    if dy.data.len() != x.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: x.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    let a = (2.0f32 / std::f32::consts::PI).sqrt();
+    let b = 0.044715f32;
+    Ok(dy
+        .data
+        .iter()
+        .zip(x.data.iter())
+        .map(|(&dy_i, &x_i)| {
+            let inner = a * (x_i + b * x_i * x_i * x_i);
+            let tanh_inner = inner.tanh();
+            let sech2 = 1.0 - tanh_inner * tanh_inner;
+            let dgelu =
+                0.5 * (1.0 + tanh_inner) + 0.5 * x_i * sech2 * a * (1.0 + 3.0 * b * x_i * x_i);
+            dy_i * dgelu
+        })
+        .collect())
+}
+
+fn cpu_rope(
+    inputs: &[NodeInput<'_>],
+    meta: &TensorMeta,
+    rotary_dim: usize,
+    pos_offset: usize,
+    theta: f32,
+) -> Result<Vec<f32>> {
+    let x = require_input(inputs, 0)?;
+    if meta.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Rope input must be 2-D [tokens, head_dim]".into(),
+        ));
+    }
+    let tokens = meta.shape.0[0] as usize;
+    let head_dim = meta.shape.0[1] as usize;
+    if rotary_dim > head_dim || !rotary_dim.is_multiple_of(2) {
+        return Err(MlxError::InvalidArgument(
+            "rotary_dim must be even and <= head_dim".into(),
+        ));
+    }
+
+    let mut out = x.data.to_vec();
+    for t in 0..tokens {
+        for i in 0..rotary_dim / 2 {
+            let inv_freq = theta.powf(-2.0 * i as f32 / rotary_dim as f32);
+            let angle = (pos_offset + t) as f32 * inv_freq;
+            let (s, c) = angle.sin_cos();
+
+            let base = t * head_dim + i * 2;
+            let x0 = x.data[base];
+            let x1 = x.data[base + 1];
+
+            out[base] = x0 * c - x1 * s;
+            out[base + 1] = x0 * s + x1 * c;
+        }
+    }
+    Ok(out)
+}
+
 fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Vec<f32>> {
     let a = require_input(inputs, 0)?;
     let ndim = a.shape.ndim();
@@ -479,6 +638,149 @@ fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Ve
         }
     }
     Ok(result)
+}
+
+fn scaled_masked_softmax(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    if a.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "ScaledMaskedSoftmax requires 2D input [Tq, Tk]".into(),
+        ));
+    }
+    let tq = a.shape.0[0] as usize;
+    let tk = a.shape.0[1] as usize;
+
+    let mut data = vec![0.0f32; tq * tk];
+
+    for i in 0..tq {
+        // Scale + mask
+        for j in 0..tk {
+            let idx = i * tk + j;
+            let mut val = a.data[idx] * scale;
+            if causal && j > i {
+                val = -1e9;
+            }
+            data[idx] = val;
+        }
+
+        // Numerically stable softmax per row
+        let row_start = i * tk;
+        let mut max_val = f32::NEG_INFINITY;
+        for j in 0..tk {
+            if data[row_start + j] > max_val {
+                max_val = data[row_start + j];
+            }
+        }
+        let mut sum_exp = 0.0f32;
+        for j in 0..tk {
+            data[row_start + j] = (data[row_start + j] - max_val).exp();
+            sum_exp += data[row_start + j];
+        }
+        for j in 0..tk {
+            data[row_start + j] /= sum_exp;
+        }
+    }
+    Ok(data)
+}
+
+fn cpu_matmul_raw(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0f32;
+            for p in 0..k {
+                sum += a[i * k + p] * b[p * n + j];
+            }
+            out[i * n + j] = sum;
+        }
+    }
+    out
+}
+
+fn cpu_transpose_2d(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * cols];
+    for r in 0..rows {
+        for c in 0..cols {
+            out[c * rows + r] = data[r * cols + c];
+        }
+    }
+    out
+}
+
+fn cpu_attention(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<Vec<f32>> {
+    if inputs.len() != 3 {
+        return Err(MlxError::InvalidArgument(
+            "Attention requires exactly 3 inputs [Q, K, V]".into(),
+        ));
+    }
+    let q = require_input(inputs, 0)?;
+    let k = require_input(inputs, 1)?;
+    let v = require_input(inputs, 2)?;
+
+    if q.shape.ndim() != 2 || k.shape.ndim() != 2 || v.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Attention inputs must be 2D".into(),
+        ));
+    }
+
+    let tq = q.shape.0[0] as usize;
+    let dh = q.shape.0[1] as usize;
+    let tk = k.shape.0[0] as usize;
+    let dh_k = k.shape.0[1] as usize;
+    let tk_v = v.shape.0[0] as usize;
+    let dh_v = v.shape.0[1] as usize;
+
+    if dh != dh_k {
+        return Err(MlxError::ShapeMismatch {
+            expected: vec![tq as i64, dh as i64],
+            got: vec![tk as i64, dh_k as i64],
+        });
+    }
+    if tk != tk_v || dh != dh_v {
+        return Err(MlxError::ShapeMismatch {
+            expected: vec![tk as i64, dh as i64],
+            got: vec![tk_v as i64, dh_v as i64],
+        });
+    }
+
+    // 1. Transpose K: [Tk, Dh] -> [Dh, Tk]
+    let kt = cpu_transpose_2d(k.data, tk, dh);
+
+    // 2. scores = Q @ K^T: [Tq, Dh] @ [Dh, Tk] -> [Tq, Tk]
+    let scores = cpu_matmul_raw(q.data, &kt, tq, dh, tk);
+
+    // 3. Scaled masked softmax on scores
+    let mut probs = vec![0.0f32; tq * tk];
+    for i in 0..tq {
+        for j in 0..tk {
+            let idx = i * tk + j;
+            let mut val = scores[idx] * scale;
+            if causal && j > i {
+                val = -1e9;
+            }
+            probs[idx] = val;
+        }
+        let row_start = i * tk;
+        let mut max_val = f32::NEG_INFINITY;
+        for j in 0..tk {
+            if probs[row_start + j] > max_val {
+                max_val = probs[row_start + j];
+            }
+        }
+        let mut sum_exp = 0.0f32;
+        for j in 0..tk {
+            probs[row_start + j] = (probs[row_start + j] - max_val).exp();
+            sum_exp += probs[row_start + j];
+        }
+        for j in 0..tk {
+            probs[row_start + j] /= sum_exp;
+        }
+    }
+
+    // 4. Y = P @ V: [Tq, Tk] @ [Tk, Dh] -> [Tq, Dh]
+    let y = cpu_matmul_raw(&probs, v.data, tq, tk, dh);
+
+    Ok(y)
 }
 
 fn rope(inputs: &[NodeInput<'_>], base: f32, offset: usize, traditional: bool) -> Result<Vec<f32>> {
@@ -681,32 +983,36 @@ mod tests {
     #[test]
     fn test_rope_offsets() {
         let backend = CpuRefBackend;
-        let base = 10_000.0;
-        let offset = 100usize;
-        let traditional = false;
+        let theta = 10_000.0;
+        let pos_offset = 100usize;
+        let rotary_dim = 4;
         // Shape: 1 seq, 4 head_dim. total = 4 floats.
         let data = [1.0, 0.0, 0.0, 1.0];
         let result = backend
             .eval_node(
-                &OpKind::RoPE {
-                    base,
-                    offset,
-                    traditional,
+                &OpKind::Rope {
+                    rotary_dim,
+                    pos_offset,
+                    theta,
                 },
                 &[input(&data, vec![1, 4])],
                 &meta(vec![1, 4]),
             )
             .unwrap();
 
-        // Expected values (same logic as before)
+        // Expected values (interleaved)
+        // i=0: inv_freq = 1.0. angle = 100.
         let cos100 = 100.0f32.cos();
         let sin100 = 100.0f32.sin();
+        // i=1: inv_freq = 10000^-0.5 = 0.01. angle = 1.0.
         let cos1 = 1.0f32.cos();
         let sin1 = 1.0f32.sin();
 
+        // data[0]=1, data[1]=0 -> out[0]=cos, out[1]=sin
+        // data[2]=0, data[3]=1 -> out[2]=-sin, out[3]=cos
         assert!((result[0] - cos100).abs() < 1e-5);
-        assert!((result[2] - sin100).abs() < 1e-5);
-        assert!((result[1] - (-sin1)).abs() < 1e-5);
+        assert!((result[1] - sin100).abs() < 1e-5);
+        assert!((result[2] - (-sin1)).abs() < 1e-5);
         assert!((result[3] - cos1).abs() < 1e-5);
     }
 
@@ -717,10 +1023,10 @@ mod tests {
         let numel = 128 * 128;
         let data = vec![1.0; numel];
         let result = backend.eval_node(
-            &OpKind::RoPE {
-                base: 10000.0,
-                offset: 0,
-                traditional: true,
+            &OpKind::Rope {
+                rotary_dim: 128,
+                pos_offset: 0,
+                theta: 10000.0,
             },
             &[input(&data, shape.clone())],
             &meta(shape.clone()),

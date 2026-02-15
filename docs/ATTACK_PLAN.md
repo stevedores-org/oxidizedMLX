@@ -7,25 +7,28 @@ This document outlines the phased approach to completing the remaining work for 
 **Objective:** Enable loading and saving model weights in the industry-standard Safetensors format.
 
 - **Task 1.1:** Implement `mlx-io` crate.
-  - Add `safetensors` and `memmap2` dependencies.
-  - Implement `load_safetensors` with `mmap` support.
-  - Implement `save_safetensors`.
-  - Add robust error handling for file I/O and parsing.
-- **Task 1.2:** Add unit tests and integration tests with mock tensor data.
+  - Add `safetensors` and `memmap2` dependencies. [DONE]
+  - Implement `load_safetensors` with `mmap` support. [DONE]
+  - Implement `save_safetensors`. [DONE]
+  - Add robust error handling for file I/O and parsing. [DONE]
+- **Task 1.2:** Add unit tests and integration tests with mock tensor data. [DONE]
 
 ## Phase 2: Metal Backend Parity (High Priority)
 
 **Objective:** Expand GPU support to cover the necessary operations for LLM inference.
 
 - **Task 2.1:** Implement missing Elementwise kernels.
-  - `Sub`, `Mul`, `Div`, `Neg`.
+  - `Sub`, `Mul`, `Div`, `Neg` [DONE]
+  - `Exp`, `Log` [PENDING]
 - **Task 2.2:** Implement Activation kernels.
-  - `Softmax`, `Silu`, `Gelu`.
+  - `Softmax`, `Silu`, `Gelu` [DONE]
 - **Task 2.3:** Implement Normalization kernels.
-  - `LayerNorm`, `RmsNorm`.
+  - `LayerNorm`, `RmsNorm` [DONE]
 - **Task 2.4:** Implement Reduction kernels.
-  - `Sum`, `Mean`, `Max`.
-- **Task 2.5:** Ensure correct dispatch in `MetalBackend`.
+  - `Sum`, `Mean`, `Max` [PENDING]
+- **Task 2.5:** Shape ops.
+  - `Transpose` (support for arbitrary axes) [PENDING - currently only 2D swap]
+  - `Broadcast` [PENDING]
 
 ## Phase 3: Neural Network Layers (High Priority)
 

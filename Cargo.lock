@@ -676,7 +676,9 @@ dependencies = [
 name = "mlx-conformance"
 version = "0.1.0"
 dependencies = [
+ "mlx-autograd",
  "mlx-core",
+ "mlx-nn",
  "rand",
  "rand_chacha",
  "serde",
@@ -757,6 +759,7 @@ dependencies = [
 name = "mlx-optim"
 version = "0.1.0"
 dependencies = [
+ "mlx-conformance",
  "mlx-core",
 ]
 

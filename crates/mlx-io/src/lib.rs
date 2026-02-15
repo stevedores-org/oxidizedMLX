@@ -10,8 +10,16 @@ pub fn load_safetensors<P: AsRef<Path>>(
     path: P,
     device: &Device,
 ) -> Result<HashMap<String, Tensor>> {
-    let file = std::fs::File::open(path)?;
-    let mmap = unsafe { memmap2::MmapOptions::new().map(&file)? };
+    let file = std::fs::File::open(path).map_err(|e| MlxError::Io(e.to_string()))?;
+
+    // SAFETY: We assume the file is not modified by other processes while mapped.
+    // This is the standard pattern for efficient tensor loading in MLX/Safetensors.
+    let mmap = unsafe {
+        memmap2::MmapOptions::new()
+            .map(&file)
+            .map_err(|e| MlxError::Io(e.to_string()))?
+    };
+
     let tensors =
         SafeTensors::deserialize(&mmap).map_err(|e| MlxError::Serialization(e.to_string()))?;
 
@@ -21,10 +29,13 @@ pub fn load_safetensors<P: AsRef<Path>>(
         let data = view.data();
 
         let f32_data: Vec<f32> = match view.dtype() {
-            safetensors::Dtype::F32 => data
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
-                .collect(),
+            safetensors::Dtype::F32 => {
+                // SAFETY: chunks_exact(4) and try_into().unwrap() are safe because
+                // the Safetensors view guarantees data length is a multiple of dtype size.
+                data.chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+                    .collect()
+            }
             _ => {
                 return Err(MlxError::Serialization(format!(
                     "Unsupported safetensors dtype: {:?} for tensor {}",
@@ -42,8 +53,10 @@ pub fn load_safetensors<P: AsRef<Path>>(
 
 /// Save tensors to a .safetensors file.
 pub fn save_safetensors<P: AsRef<Path>>(path: P, tensors: &HashMap<String, Tensor>) -> Result<()> {
+    // Phase 1: Materialize all tensor data into owned buffers.
+    // We do this first because Tensor::to_vec_f32() might trigger evaluation,
+    // and we need stable references to the byte buffers when creating Safetensors views.
     let mut data_map = HashMap::new();
-
     for (name, tensor) in tensors {
         let data = tensor.to_vec_f32()?;
         let shape = tensor
@@ -56,6 +69,7 @@ pub fn save_safetensors<P: AsRef<Path>>(path: P, tensors: &HashMap<String, Tenso
         data_map.insert(name.clone(), (shape, bytes));
     }
 
+    // Phase 2: Create views and serialize.
     let mut views = HashMap::new();
     for (name, (shape, bytes)) in &data_map {
         let view =
@@ -66,7 +80,7 @@ pub fn save_safetensors<P: AsRef<Path>>(path: P, tensors: &HashMap<String, Tenso
 
     let bytes = serialize(views, &None).map_err(|e| MlxError::Serialization(e.to_string()))?;
 
-    std::fs::write(path, bytes)?;
+    std::fs::write(path, bytes).map_err(|e| MlxError::Io(e.to_string()))?;
     Ok(())
 }
 

@@ -24,7 +24,8 @@ impl Device {
     pub fn default_device() -> Self {
         #[cfg(target_os = "macos")]
         {
-            Device::Gpu
+            // TODO: Enable Metal backend when available.
+            Device::Cpu
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -76,7 +77,32 @@ impl Tensor {
         Self::from_data(data.to_vec(), shape, DType::F32, device)
     }
 
-    /// Create a tensor from a Vec<f32>.
+    /// Create a tensor from f32 data on a specific stream.
+    pub fn from_f32_on_stream(data: &[f32], shape: &Shape, stream: &Arc<Stream>) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        let meta = TensorMeta {
+            shape: shape.clone(),
+            dtype: DType::F32,
+        };
+        let node_id = stream.add_constant(data.to_vec(), meta);
+        Ok(Self {
+            node_id,
+            shape: shape.clone(),
+            dtype: DType::F32,
+            device: Device::Gpu, // Assume GPU if custom stream for now, or detect
+            stream: Arc::clone(stream),
+        })
+    }
+
+    /// Create a tensor from a `Vec<f32>`.
     pub fn from_vec(data: Vec<f32>, shape: &Shape, device: &Device) -> Result<Self> {
         let expected = shape.numel() as usize;
         if data.len() != expected {
@@ -90,12 +116,7 @@ impl Tensor {
         Self::from_data(data, shape, DType::F32, device)
     }
 
-    pub(crate) fn from_data(
-        data: Vec<f32>,
-        shape: &Shape,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Self> {
+    fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
         let stream = default_stream();
         let meta = TensorMeta {
             shape: shape.clone(),
@@ -385,12 +406,12 @@ impl Tensor {
     }
 
     /// Apply Rotary Positional Embeddings.
-    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+    pub fn rope(&self, rotary_dim: usize, pos_offset: usize, theta: f32) -> Tensor {
         self.lazy_op(
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
             },
             SmallVec::from_slice(&[self.node_id]),
             self.shape.clone(),
@@ -450,6 +471,94 @@ impl Tensor {
             input.shape.clone(),
             input.dtype,
         ))
+    }
+
+    /// Softmax VJP: compute grad_input given grad_output (self) and softmax output.
+    pub fn softmax_vjp(&self, softmax_output: &Tensor, axis: i32) -> Result<Tensor> {
+        if self.shape != softmax_output.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: softmax_output.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != softmax_output.dtype {
+            return Err(MlxError::InvalidArgument(
+                "softmax_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != softmax_output.device {
+            return Err(MlxError::InvalidArgument(
+                "softmax_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::SoftmaxVjp { axis },
+            SmallVec::from_slice(&[self.node_id, softmax_output.node_id]),
+            softmax_output.shape.clone(),
+            softmax_output.dtype,
+        ))
+    }
+
+    /// SiLU VJP: compute grad_input given grad_output (self) and original input.
+    pub fn silu_vjp(&self, input: &Tensor) -> Result<Tensor> {
+        if self.shape != input.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: input.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "silu_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "silu_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::SiluVjp,
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        ))
+    }
+
+    /// GELU VJP: compute grad_input given grad_output (self) and original input.
+    pub fn gelu_vjp(&self, input: &Tensor) -> Result<Tensor> {
+        if self.shape != input.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: input.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "gelu_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "gelu_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::GeluVjp,
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        ))
+    }
+
+    /// Element-wise square root.
+    pub fn sqrt(&self) -> Tensor {
+        self.lazy_op(
+            OpKind::Sqrt,
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
     }
 
     // ── Materialization ─────────────────────────────────────────────────
