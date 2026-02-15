@@ -7,3 +7,6 @@ description = "Automatic differentiation (reverse-mode AD) for MLX tensors"
 
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+
+[dev-dependencies]
+mlx-conformance = { path = "../mlx-conformance" }

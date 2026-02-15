@@ -79,6 +79,12 @@ pub enum OpKind {
     RmsNorm {
         eps: f32,
     },
+
+    // ── Broadcasting ──────────────────────────────────────────────────
+    /// Broadcast a tensor to a target shape (numpy-style rules).
+    Broadcast {
+        target_shape: Shape,
+    },
 }
 
 /// The computation graph arena.

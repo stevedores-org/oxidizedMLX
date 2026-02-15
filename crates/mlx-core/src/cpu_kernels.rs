@@ -58,6 +58,7 @@ impl Backend for CpuRefBackend {
             }
             OpKind::LayerNorm { eps } => layer_norm(inputs, *eps, output_meta),
             OpKind::RmsNorm { eps } => rms_norm(inputs, *eps, output_meta),
+            OpKind::Broadcast { target_shape } => broadcast(inputs, target_shape),
         }
     }
 }
@@ -298,6 +299,39 @@ fn layer_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<
         for (i, &x) in slice.iter().enumerate() {
             result[start + i] = (x - mean) / std;
         }
+    }
+    Ok(result)
+}
+
+fn broadcast(inputs: &[NodeInput<'_>], target_shape: &crate::Shape) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    let in_shape = &a.shape.0;
+    let out_shape = &target_shape.0;
+    let out_ndim = out_shape.len();
+    let in_ndim = in_shape.len();
+    let pad = out_ndim - in_ndim;
+    let total: usize = out_shape.iter().product::<i64>() as usize;
+
+    let mut result = vec![0.0f32; total];
+    for (out_flat, out) in result.iter_mut().enumerate() {
+        let mut remaining = out_flat;
+        let mut in_flat = 0usize;
+        let mut in_stride = 1usize;
+
+        for d in (0..out_ndim).rev() {
+            let out_dim = out_shape[d] as usize;
+            let coord = remaining % out_dim;
+            remaining /= out_dim;
+
+            if d >= pad {
+                let in_d = d - pad;
+                let in_dim = in_shape[in_d] as usize;
+                let in_coord = if in_dim == 1 { 0 } else { coord };
+                in_flat += in_coord * in_stride;
+                in_stride *= in_dim;
+            }
+        }
+        *out = a.data[in_flat];
     }
     Ok(result)
 }
