@@ -79,6 +79,13 @@ pub enum OpKind {
     RmsNorm {
         eps: f32,
     },
+
+    // ── Positional embeddings ───────────────────────────────────────────
+    RoPE {
+        base: f32,
+        offset: usize,
+        traditional: bool,
+    },
 }
 
 /// The computation graph arena.

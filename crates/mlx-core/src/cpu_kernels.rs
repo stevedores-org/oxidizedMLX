@@ -58,6 +58,11 @@ impl Backend for CpuRefBackend {
             }
             OpKind::LayerNorm { eps } => layer_norm(inputs, *eps, output_meta),
             OpKind::RmsNorm { eps } => rms_norm(inputs, *eps, output_meta),
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            } => rope(inputs, *base, *offset, *traditional),
         }
     }
 }
@@ -326,6 +331,48 @@ fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Ve
     Ok(result)
 }
 
+fn rope(inputs: &[NodeInput<'_>], base: f32, offset: usize, traditional: bool) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    let shape = &a.shape.0;
+    let ndim = shape.len();
+    if ndim < 2 {
+        return Err(MlxError::InvalidArgument("RoPE requires at least 2D tensor".into()));
+    }
+
+    let head_dim = shape[ndim - 1] as usize;
+    let seq_len = shape[ndim - 2] as usize;
+    let batch_size = a.data.len() / (seq_len * head_dim);
+
+    let mut out = a.data.to_vec();
+
+    for b in 0..batch_size {
+        for s in 0..seq_len {
+            let pos = (s + offset) as f32;
+            let base_idx = b * seq_len * head_dim + s * head_dim;
+            
+            for i in 0..(head_dim / 2) {
+                let (i0, i1) = if traditional {
+                    (2 * i, 2 * i + 1)
+                } else {
+                    (i, i + head_dim / 2)
+                };
+
+                let theta = pos / base.powf((2. * i as f32) / head_dim as f32);
+                let cos_t = theta.cos();
+                let sin_t = theta.sin();
+
+                let x0 = a.data[base_idx + i0];
+                let x1 = a.data[base_idx + i1];
+
+                out[base_idx + i0] = x0 * cos_t - x1 * sin_t;
+                out[base_idx + i1] = x1 * cos_t + x0 * sin_t;
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,4 +508,56 @@ mod tests {
         assert!((result[1] - 0.7311).abs() < 1e-3);
         assert!((result[2] - (-0.2689)).abs() < 1e-3);
     }
+<<<<<<< Updated upstream
+=======
+    #[test]
+    fn test_layer_norm_zero_dim() {
+        let backend = CpuRefBackend;
+        let data = [];
+        let result = backend
+            .eval_node(
+                &OpKind::LayerNorm { eps: 1e-5 },
+                &[input(&data, vec![2, 0])],
+                &meta(vec![2, 0]),
+            )
+            .unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_reduce_mean_invalid_axis() {
+        let backend = CpuRefBackend;
+        let data = [1.0, 2.0, 3.0];
+        let result = backend.eval_node(
+            &OpKind::Mean { axis: Some(10) },
+            &[input(&data, vec![3])],
+            &meta(vec![3]),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rope() {
+        let backend = CpuRefBackend;
+        // 1 seq, 4 dims
+        let data = [1.0, 0.0, 0.0, 1.0];
+        let result = backend
+            .eval_node(
+                &OpKind::RoPE {
+                    base: 10000.0,
+                    offset: 0,
+                    traditional: true,
+                },
+                &[input(&data, vec![1, 4])],
+                &meta(vec![1, 4]),
+            )
+            .unwrap();
+        
+        // pos=0 => cos=1, sin=0 => should be identity
+        assert!((result[0] - 1.0).abs() < 1e-6);
+        assert!((result[1] - 0.0).abs() < 1e-6);
+        assert!((result[2] - 0.0).abs() < 1e-6);
+        assert!((result[3] - 1.0).abs() < 1e-6);
+    }
+>>>>>>> Stashed changes
 }

@@ -112,6 +112,14 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             let new_dims: Vec<i64> = perm.iter().map(|&ax| a.0[ax]).collect();
             Ok(Shape::new(new_dims))
         }
+
+        // RoPE preserves shape.
+        OpKind::RoPE { .. } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            Ok((*a).clone())
+        }
     }
 }
 

@@ -352,6 +352,22 @@ impl Tensor {
         )
     }
 
+    // ── Positional embeddings ───────────────────────────────────────────
+
+    /// Apply rotary positional embeddings.
+    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+        self.lazy_op(
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            },
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
+    }
+
     // ── Materialization ─────────────────────────────────────────────────
 
     /// Materialize the tensor — triggers evaluation of the computation graph.
