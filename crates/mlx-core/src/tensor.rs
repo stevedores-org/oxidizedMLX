@@ -202,9 +202,6 @@ impl Tensor {
         }
         let mut new_dims: Vec<i64> = self.shape.0.clone();
         new_dims.remove(ax as usize);
-        if new_dims.is_empty() {
-            new_dims.push(1);
-        }
         Ok(self.lazy_op(
             OpKind::Sum { axis: Some(axis) },
             SmallVec::from_slice(&[self.node_id]),
@@ -218,7 +215,7 @@ impl Tensor {
         Ok(self.lazy_op(
             OpKind::Sum { axis: None },
             SmallVec::from_slice(&[self.node_id]),
-            Shape::new(vec![1]),
+            Shape::scalar(),
             self.dtype,
         ))
     }
@@ -272,16 +269,24 @@ impl Tensor {
 
     /// Transpose (reverses axes by default, or use specified permutation).
     pub fn transpose(&self, axes: Option<&[usize]>) -> Result<Tensor> {
+        let ndim = self.shape.ndim();
         let perm: Vec<usize> = match axes {
             Some(ax) => {
-                if ax.len() != self.shape.ndim() {
+                if ax.len() != ndim {
                     return Err(MlxError::InvalidArgument(
                         "transpose axes length must match ndim".into(),
                     ));
                 }
+                for &axis in ax {
+                    if axis >= ndim {
+                        return Err(MlxError::InvalidArgument(format!(
+                            "transpose axis {axis} out of range for ndim {ndim}"
+                        )));
+                    }
+                }
                 ax.to_vec()
             }
-            None => (0..self.shape.ndim()).rev().collect(),
+            None => (0..ndim).rev().collect(),
         };
         let new_dims: Vec<i64> = perm.iter().map(|&ax| self.shape.0[ax]).collect();
         Ok(self.lazy_op(
@@ -664,5 +669,14 @@ mod tests {
         let vals = b.to_vec_f32().unwrap();
         let mean: f32 = vals.iter().sum::<f32>() / 3.0;
         assert!(mean.abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_reduce_zero_dim_bug() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 3, 0]), &cpu()).unwrap();
+        let s = x.sum_axis(1).unwrap(); // Should return shape [2, 0]
+        assert_eq!(s.shape().0, vec![2, 0]);
+        let vals = s.to_vec_f32().unwrap();
+        assert_eq!(vals.len(), 0);
     }
 }

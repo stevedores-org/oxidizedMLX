@@ -355,4 +355,14 @@ mod tests {
         assert_eq!(val.to_vec_f32().unwrap(), vec![13.0]); // 4 + 9
         mlx_conformance::assert_allclose(&dx.to_vec_f32().unwrap(), &[4.0, 6.0], 1e-5, 1e-5);
     }
+
+    #[test]
+    fn test_sum_axis_grad_bug() {
+        let x = t(&[1.0, 2.0, 3.0], &[3]);
+        // f(x) = sum(x)
+        // grad(f) should be [1, 1, 1]
+        let g = grad(|x| x.sum_axis(0), &x).expect("grad failed");
+        let vals = g.to_vec_f32().unwrap();
+        assert_eq!(vals, vec![1.0, 1.0, 1.0]);
+    }
 }
