@@ -289,6 +289,8 @@ mod tests {
 
         stream.eval(out).unwrap();
         let after_first = calls.load(Ordering::Relaxed);
+        assert_eq!(after_first, 2);
+        assert_eq!(stream.get_buffer(out).unwrap(), vec![-4.0, -6.0]);
 
         // Repeated eval should not call into the backend again.
         stream.eval(out).unwrap();
