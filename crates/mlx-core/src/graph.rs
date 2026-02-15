@@ -522,6 +522,8 @@ mod tests {
             shape: Shape::new(vec![2]),
             dtype: DType::F32,
         };
+        // Constants must NOT be deduplicated — they may receive independent
+        // gradients during backpropagation.
         let a = g.intern_node(
             OpKind::Constant,
             SmallVec::new(),
@@ -546,8 +548,18 @@ mod tests {
             shape: Shape::new(vec![2]),
             dtype: DType::F32,
         };
-        let a = g.add_node_raw(OpKind::Constant, SmallVec::new(), meta.clone());
-        let b = g.add_node_raw(OpKind::Constant, SmallVec::new(), meta.clone());
+        let a = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
+        let b = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[3.0, 4.0]),
+        );
 
         let add1 = g.intern_node(
             OpKind::Add,
@@ -562,6 +574,6 @@ mod tests {
             None,
         );
         assert_eq!(add1, add2);
-        assert_eq!(g.len(), 3); // 2 constants + 1 add
+        assert_eq!(g.len(), 3); // 2 constants + 1 deduplicated add
     }
 }
