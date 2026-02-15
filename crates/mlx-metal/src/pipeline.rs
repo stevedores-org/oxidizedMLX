@@ -1,7 +1,7 @@
 //! Metal library compilation and compute pipeline cache.
 
-use mlx_core::{MlxError, Result};
 use metal::{CompileOptions, ComputePipelineState, Device, Library};
+use mlx_core::{MlxError, Result};
 use std::collections::HashMap;
 use std::sync::Mutex;
 

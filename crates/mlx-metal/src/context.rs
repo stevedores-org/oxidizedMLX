@@ -1,7 +1,7 @@
 //! Metal device and command queue context.
 
-use mlx_core::{MlxError, Result};
 use metal::{CommandQueue, Device};
+use mlx_core::{MlxError, Result};
 use std::sync::Arc;
 use tracing::info;
 

@@ -1,7 +1,7 @@
 //! Shared buffer allocation and mapping helpers.
 
-use mlx_core::{MlxError, Result};
 use metal::{Buffer, MTLResourceOptions};
+use mlx_core::{MlxError, Result};
 use std::marker::PhantomData;
 use std::mem;
 use std::ptr;
