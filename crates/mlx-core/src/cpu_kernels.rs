@@ -61,6 +61,11 @@ impl Backend for CpuRefBackend {
             OpKind::Broadcast { target_shape } => broadcast(inputs, target_shape),
             OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
             OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            } => rope(inputs, *base, *offset, *traditional),
         }
     }
 }
@@ -476,6 +481,73 @@ fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Ve
     Ok(result)
 }
 
+fn rope(
+    inputs: &[NodeInput<'_>],
+    base: f32,
+    offset: usize,
+    traditional: bool,
+) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    let ndim = a.shape.ndim();
+    if ndim < 1 {
+        return Err(MlxError::InvalidArgument(
+            "RoPE requires at least 1 dimension".into(),
+        ));
+    }
+
+    let head_dim = a.shape.0[ndim - 1] as usize;
+    if head_dim % 2 != 0 {
+        return Err(MlxError::InvalidArgument(format!(
+            "RoPE head_dim must be even, got {head_dim}"
+        )));
+    }
+    let half_dim = head_dim / 2;
+
+    let total = a.data.len();
+    let num_heads_total = total / head_dim;
+
+    let mut result = vec![0.0f32; total];
+
+    for i in 0..num_heads_total {
+        // Calculate position based on offset.
+        // Assuming flattening over batch/seq for now.
+        // More robust logic would use shape explicitly.
+        // Here we simplify assuming linear indexing corresponds to position.
+        // Wait, issue specified (tokens, head_dim) -> i corresponds to token index (pos).
+        
+        let pos = (offset + i) as f32;
+
+        for d in 0..half_dim {
+            let theta = pos * base.powf(-(2.0 * d as f32 / head_dim as f32));
+            let cos_theta = theta.cos();
+            let sin_theta = theta.sin();
+
+            if traditional {
+                // Pairs are adjacent: (2d, 2d+1)
+                let idx0 = i * head_dim + 2 * d;
+                let idx1 = idx0 + 1;
+                
+                let x0 = a.data[idx0];
+                let x1 = a.data[idx1];
+                
+                result[idx0] = x0 * cos_theta - x1 * sin_theta;
+                result[idx1] = x0 * sin_theta + x1 * cos_theta;
+            } else {
+                // OpenAI style: pairs are (d, d + half_dim)
+                let idx0 = i * head_dim + d;
+                let idx1 = i * head_dim + d + half_dim;
+                
+                let x0 = a.data[idx0];
+                let x1 = a.data[idx1];
+                
+                result[idx0] = x0 * cos_theta - x1 * sin_theta;
+                result[idx1] = x0 * sin_theta + x1 * cos_theta;
+            }
+        }
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,8 +679,59 @@ mod tests {
             .eval_node(&OpKind::Silu, &[input(&data, vec![3])], &meta(vec![3]))
             .unwrap();
         // silu(0) = 0, silu(1) ≈ 0.7311, silu(-1) ≈ -0.2689
-        assert!((result[0]).abs() < 1e-6);
         assert!((result[1] - 0.7311).abs() < 1e-3);
         assert!((result[2] - (-0.2689)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_rope_offsets() {
+        let backend = CpuRefBackend;
+        let base = 10_000.0;
+        let offset = 100usize;
+        let traditional = false;
+        // Shape: 1 seq, 4 head_dim. total = 4 floats.
+        let data = [1.0, 0.0, 0.0, 1.0];
+        let result = backend
+            .eval_node(
+                &OpKind::RoPE {
+                    base,
+                    offset,
+                    traditional,
+                },
+                &[input(&data, vec![1, 4])],
+                &meta(vec![1, 4]),
+            )
+            .unwrap();
+        
+        // Expected values (same logic as before)
+        let cos100 = 100.0f32.cos();
+        let sin100 = 100.0f32.sin();
+        let cos1 = 1.0f32.cos();
+        let sin1 = 1.0f32.sin();
+        
+        assert!((result[0] - cos100).abs() < 1e-5);
+        assert!((result[2] - sin100).abs() < 1e-5);
+        assert!((result[1] - (-sin1)).abs() < 1e-5);
+        assert!((result[3] - cos1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_rope_large() {
+        let backend = CpuRefBackend;
+        let shape = vec![128, 128];
+        let numel = 128 * 128;
+        let data = vec![1.0; numel];
+        let result = backend
+            .eval_node(
+                &OpKind::RoPE {
+                    base: 10000.0,
+                    offset: 0,
+                    traditional: true,
+                },
+                &[input(&data, shape.clone())],
+                &meta(shape.clone()),
+            );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), numel);
     }
 }

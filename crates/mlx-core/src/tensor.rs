@@ -365,6 +365,20 @@ impl Tensor {
         )
     }
 
+    /// Apply Rotary Positional Embeddings.
+    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+        self.lazy_op(
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            },
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
+    }
+
     // ── Backward (VJP) helpers ─────────────────────────────────────────
 
     /// LayerNorm VJP: compute grad_input given grad_output and original input.
