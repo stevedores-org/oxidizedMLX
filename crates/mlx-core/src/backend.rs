@@ -5,11 +5,40 @@
 //! materialized buffers and evaluation scheduling.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock, Mutex};
+
+use smallvec::SmallVec;
 
 use crate::Result;
 use crate::graph::{Graph, Node, NodeId, OpKind, TensorMeta};
 use crate::types::{DType, Shape};
+
+/// CSE key for deduplicating pure operations.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CseKey {
+    op: OpKind,
+    inputs: SmallVec<[NodeId; 2]>,
+    meta: TensorMeta,
+}
+
+/// CSE key for deduplicating constant nodes with identical data.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ConstKey {
+    meta: TensorMeta,
+    payload_hash: u64,
+}
+
+/// Hash an f32 slice by converting each element to its bit pattern.
+fn hash_f32_slice(data: &[f32]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    data.len().hash(&mut hasher);
+    for &v in data {
+        v.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
 
 /// Materialized input data passed to a backend for evaluation.
 pub struct NodeInput<'a> {
@@ -41,6 +70,8 @@ pub struct Stream {
     graph: Mutex<Graph>,
     backend: Box<dyn Backend>,
     buffers: Mutex<HashMap<NodeId, Vec<f32>>>,
+    cse_ops: Mutex<HashMap<CseKey, NodeId>>,
+    cse_consts: Mutex<HashMap<ConstKey, NodeId>>,
 }
 
 impl Stream {
@@ -50,27 +81,67 @@ impl Stream {
             graph: Mutex::new(Graph::new()),
             backend,
             buffers: Mutex::new(HashMap::new()),
+            cse_ops: Mutex::new(HashMap::new()),
+            cse_consts: Mutex::new(HashMap::new()),
         }
     }
 
     /// Add a constant node (data already known).
+    ///
+    /// Identical constants (same meta + payload) are deduplicated.
     pub fn add_constant(&self, data: Vec<f32>, meta: TensorMeta) -> NodeId {
+        let key = ConstKey {
+            meta: meta.clone(),
+            payload_hash: hash_f32_slice(&data),
+        };
+
+        let mut cse_consts = self.cse_consts.lock().unwrap();
+        if let Some(&existing) = cse_consts.get(&key) {
+            // Verify payload equality to guard against hash collisions.
+            let buffers = self.buffers.lock().unwrap();
+            if let Some(existing_data) = buffers.get(&existing)
+                && data.len() == existing_data.len()
+                && data
+                    .iter()
+                    .zip(existing_data.iter())
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            {
+                return existing;
+            }
+        }
+
         let mut graph = self.graph.lock().unwrap();
-        let id = graph.add_node(OpKind::Constant, smallvec::SmallVec::new(), meta);
+        let id = graph.add_node(OpKind::Constant, SmallVec::new(), meta);
         let mut buffers = self.buffers.lock().unwrap();
         buffers.insert(id, data);
+        cse_consts.insert(key, id);
         id
     }
 
     /// Add an operation node to the graph.
-    pub fn add_op(
-        &self,
-        op: OpKind,
-        inputs: smallvec::SmallVec<[NodeId; 2]>,
-        meta: TensorMeta,
-    ) -> NodeId {
-        let mut graph = self.graph.lock().unwrap();
-        graph.add_node(op, inputs, meta)
+    ///
+    /// CSE-eligible ops with identical (op, inputs, meta) are deduplicated.
+    pub fn add_op(&self, op: OpKind, inputs: SmallVec<[NodeId; 2]>, meta: TensorMeta) -> NodeId {
+        if op.is_cse_eligible() {
+            let key = CseKey {
+                op: op.clone(),
+                inputs: inputs.clone(),
+                meta: meta.clone(),
+            };
+
+            let mut cse_ops = self.cse_ops.lock().unwrap();
+            if let Some(&existing) = cse_ops.get(&key) {
+                return existing;
+            }
+
+            let mut graph = self.graph.lock().unwrap();
+            let id = graph.add_node(op, inputs, meta);
+            cse_ops.insert(key, id);
+            id
+        } else {
+            let mut graph = self.graph.lock().unwrap();
+            graph.add_node(op, inputs, meta)
+        }
     }
 
     /// Evaluate all nodes needed to materialize the given output.
@@ -162,6 +233,11 @@ impl Stream {
     /// Topological sort of the subgraph rooted at the given outputs.
     pub fn topo_sort(&self, outputs: &[NodeId]) -> Vec<NodeId> {
         self.graph.lock().unwrap().topo_sort(outputs)
+    }
+
+    /// Number of nodes in the graph.
+    pub fn graph_node_count(&self) -> usize {
+        self.graph.lock().unwrap().len()
     }
 }
 

@@ -4,6 +4,8 @@
 //! `eval()` is called, at which point the scheduler topologically sorts the
 //! graph and dispatches to the active backend.
 
+use std::hash::{Hash, Hasher};
+
 use crate::types::{DType, Shape};
 use smallvec::SmallVec;
 
@@ -12,7 +14,7 @@ use smallvec::SmallVec;
 pub struct NodeId(pub(crate) u64);
 
 /// Metadata about a tensor (known before materialization).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TensorMeta {
     pub shape: Shape,
     pub dtype: DType,
@@ -85,6 +87,60 @@ pub enum OpKind {
     Broadcast {
         target_shape: Shape,
     },
+}
+
+impl PartialEq for OpKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Constant, Self::Constant) => true,
+            (Self::Parameter, Self::Parameter) => true,
+            (Self::Add, Self::Add) => true,
+            (Self::Sub, Self::Sub) => true,
+            (Self::Mul, Self::Mul) => true,
+            (Self::Div, Self::Div) => true,
+            (Self::Neg, Self::Neg) => true,
+            (Self::Sum { axis: a }, Self::Sum { axis: b }) => a == b,
+            (Self::Mean { axis: a }, Self::Mean { axis: b }) => a == b,
+            (Self::Max { axis: a }, Self::Max { axis: b }) => a == b,
+            (Self::MatMul, Self::MatMul) => true,
+            (Self::Reshape { new_shape: a }, Self::Reshape { new_shape: b }) => a == b,
+            (Self::Transpose { axes: a }, Self::Transpose { axes: b }) => a == b,
+            (Self::Softmax { axis: a }, Self::Softmax { axis: b }) => a == b,
+            (Self::Silu, Self::Silu) => true,
+            (Self::Gelu, Self::Gelu) => true,
+            (Self::LayerNorm { eps: a }, Self::LayerNorm { eps: b }) => a.to_bits() == b.to_bits(),
+            (Self::RmsNorm { eps: a }, Self::RmsNorm { eps: b }) => a.to_bits() == b.to_bits(),
+            (Self::Broadcast { target_shape: a }, Self::Broadcast { target_shape: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for OpKind {}
+
+impl Hash for OpKind {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::Sum { axis } | Self::Mean { axis } | Self::Max { axis } => axis.hash(state),
+            Self::Reshape { new_shape } => new_shape.hash(state),
+            Self::Transpose { axes } => axes.hash(state),
+            Self::Softmax { axis } => axis.hash(state),
+            Self::LayerNorm { eps } => eps.to_bits().hash(state),
+            Self::RmsNorm { eps } => eps.to_bits().hash(state),
+            Self::Broadcast { target_shape } => target_shape.hash(state),
+            _ => {}
+        }
+    }
+}
+
+impl OpKind {
+    /// Returns `true` for pure ops that can be deduplicated via CSE.
+    /// `Constant` and `Parameter` are not eligible — constants are handled
+    /// separately in `add_constant`, and parameters are unique by definition.
+    pub fn is_cse_eligible(&self) -> bool {
+        !matches!(self, Self::Constant | Self::Parameter)
+    }
 }
 
 /// The computation graph arena.
