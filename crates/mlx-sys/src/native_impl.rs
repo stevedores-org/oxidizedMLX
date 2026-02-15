@@ -36,6 +36,20 @@ unsafe fn ref_device<'a>(p: *mut mlx_device_t) -> &'a Device {
     unsafe { &*(p as *const Device) }
 }
 
+/// Build a slice from a C pointer+length.
+///
+/// Returns `Some(&[])` when `len == 0` (even if `ptr` is null). Returns `None`
+/// when `len > 0` and `ptr` is null.
+unsafe fn safe_slice<'a, T>(ptr: *const T, len: size_t) -> Option<&'a [T]> {
+    if len == 0 {
+        return Some(&[]);
+    }
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(ptr, len) })
+}
+
 fn convert_dtype(dt: mlx_dtype_t) -> DType {
     match dt {
         mlx_dtype_t::F32 => DType::F32,
@@ -50,7 +64,26 @@ fn convert_dtype(dt: mlx_dtype_t) -> DType {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_default_device() -> *mut mlx_device_t {
+    box_device(Device::default_device())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_device_type(d: *mut mlx_device_t) -> crate::mlx_device_type_t {
+    let dev = unsafe { ref_device(d) };
+    match dev {
+        Device::Cpu => crate::mlx_device_type_t::CPU,
+        Device::Gpu => crate::mlx_device_type_t::GPU,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_cpu_device() -> *mut mlx_device_t {
     box_device(Device::Cpu)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_gpu_device() -> *mut mlx_device_t {
+    box_device(Device::Gpu)
 }
 
 // ── Tensor creation ─────────────────────────────────────────────────────
@@ -62,8 +95,14 @@ pub unsafe extern "C" fn mlxrs_zeros(
     shape_ptr: *const i64,
     shape_len: size_t,
 ) -> *mut mlx_tensor_t {
+    if device.is_null() {
+        return std::ptr::null_mut();
+    }
     let dev = unsafe { ref_device(device) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
+    let dims = match unsafe { safe_slice(shape_ptr, shape_len) } {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
     let shape = Shape::new(dims.to_vec());
     match Tensor::zeros(&shape, convert_dtype(dtype), dev) {
         Ok(t) => box_tensor(t),
@@ -78,8 +117,14 @@ pub unsafe extern "C" fn mlxrs_ones(
     shape_ptr: *const i64,
     shape_len: size_t,
 ) -> *mut mlx_tensor_t {
+    if device.is_null() {
+        return std::ptr::null_mut();
+    }
     let dev = unsafe { ref_device(device) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
+    let dims = match unsafe { safe_slice(shape_ptr, shape_len) } {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
     let shape = Shape::new(dims.to_vec());
     match Tensor::ones(&shape, convert_dtype(dtype), dev) {
         Ok(t) => box_tensor(t),
@@ -95,9 +140,18 @@ pub unsafe extern "C" fn mlxrs_from_f32(
     data_ptr: *const f32,
     data_len: size_t,
 ) -> *mut mlx_tensor_t {
+    if device.is_null() {
+        return std::ptr::null_mut();
+    }
     let dev = unsafe { ref_device(device) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
-    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len) };
+    let dims = match unsafe { safe_slice(shape_ptr, shape_len) } {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
+    let data = match unsafe { safe_slice(data_ptr, data_len) } {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
     let shape = Shape::new(dims.to_vec());
     match Tensor::from_f32(data, &shape, dev) {
         Ok(t) => box_tensor(t),
@@ -112,6 +166,9 @@ pub unsafe extern "C" fn mlxrs_add(
     a: *mut mlx_tensor_t,
     b: *mut mlx_tensor_t,
 ) -> *mut mlx_tensor_t {
+    if a.is_null() || b.is_null() {
+        return std::ptr::null_mut();
+    }
     let (a, b) = unsafe { (ref_tensor(a), ref_tensor(b)) };
     match a.add(b) {
         Ok(t) => box_tensor(t),
@@ -124,6 +181,9 @@ pub unsafe extern "C" fn mlxrs_mul(
     a: *mut mlx_tensor_t,
     b: *mut mlx_tensor_t,
 ) -> *mut mlx_tensor_t {
+    if a.is_null() || b.is_null() {
+        return std::ptr::null_mut();
+    }
     let (a, b) = unsafe { (ref_tensor(a), ref_tensor(b)) };
     match a.mul(b) {
         Ok(t) => box_tensor(t),
@@ -133,6 +193,9 @@ pub unsafe extern "C" fn mlxrs_mul(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_neg(a: *mut mlx_tensor_t) -> *mut mlx_tensor_t {
+    if a.is_null() {
+        return std::ptr::null_mut();
+    }
     let a = unsafe { ref_tensor(a) };
     box_tensor(a.neg())
 }
@@ -144,6 +207,9 @@ pub unsafe extern "C" fn mlxrs_matmul(
     a: *mut mlx_tensor_t,
     b: *mut mlx_tensor_t,
 ) -> *mut mlx_tensor_t {
+    if a.is_null() || b.is_null() {
+        return std::ptr::null_mut();
+    }
     let (a, b) = unsafe { (ref_tensor(a), ref_tensor(b)) };
     match a.matmul(b) {
         Ok(t) => box_tensor(t),
@@ -155,6 +221,9 @@ pub unsafe extern "C" fn mlxrs_matmul(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_sum(a: *mut mlx_tensor_t, axis: c_int) -> *mut mlx_tensor_t {
+    if a.is_null() {
+        return std::ptr::null_mut();
+    }
     let a = unsafe { ref_tensor(a) };
     match a.sum_axis(axis) {
         Ok(t) => box_tensor(t),
@@ -164,6 +233,9 @@ pub unsafe extern "C" fn mlxrs_sum(a: *mut mlx_tensor_t, axis: c_int) -> *mut ml
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_sum_all(a: *mut mlx_tensor_t) -> *mut mlx_tensor_t {
+    if a.is_null() {
+        return std::ptr::null_mut();
+    }
     let a = unsafe { ref_tensor(a) };
     match a.sum_all() {
         Ok(t) => box_tensor(t),
@@ -179,8 +251,14 @@ pub unsafe extern "C" fn mlxrs_reshape(
     shape_ptr: *const i64,
     shape_len: size_t,
 ) -> *mut mlx_tensor_t {
+    if a.is_null() {
+        return std::ptr::null_mut();
+    }
     let a = unsafe { ref_tensor(a) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
+    let dims = match unsafe { safe_slice(shape_ptr, shape_len) } {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
     let new_shape = Shape::new(dims.to_vec());
     match a.reshape(&new_shape) {
         Ok(t) => box_tensor(t),
@@ -190,6 +268,9 @@ pub unsafe extern "C" fn mlxrs_reshape(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_transpose(a: *mut mlx_tensor_t) -> *mut mlx_tensor_t {
+    if a.is_null() {
+        return std::ptr::null_mut();
+    }
     let a = unsafe { ref_tensor(a) };
     match a.transpose(None) {
         Ok(t) => box_tensor(t),
@@ -201,6 +282,9 @@ pub unsafe extern "C" fn mlxrs_transpose(a: *mut mlx_tensor_t) -> *mut mlx_tenso
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_softmax(a: *mut mlx_tensor_t, axis: c_int) -> *mut mlx_tensor_t {
+    if a.is_null() {
+        return std::ptr::null_mut();
+    }
     let a = unsafe { ref_tensor(a) };
     match a.softmax(axis) {
         Ok(t) => box_tensor(t),
@@ -212,6 +296,9 @@ pub unsafe extern "C" fn mlxrs_softmax(a: *mut mlx_tensor_t, axis: c_int) -> *mu
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_eval(t: *mut mlx_tensor_t) {
+    if t.is_null() {
+        return;
+    }
     let t = unsafe { ref_tensor(t) };
     let _ = t.eval();
 }
@@ -222,12 +309,27 @@ pub unsafe extern "C" fn mlxrs_to_f32_vec(
     out_ptr: *mut f32,
     out_len: size_t,
 ) -> c_int {
+    if t.is_null() {
+        return -1;
+    }
     let t = unsafe { ref_tensor(t) };
     match t.to_vec_f32() {
         Ok(data) => {
-            let copy_len = data.len().min(out_len);
+            let required_len = data.len();
+            if required_len > (c_int::MAX as usize) {
+                return -3;
+            }
+            if out_len == 0 {
+                return required_len as c_int;
+            }
+            if out_len < required_len {
+                return required_len as c_int; // buffer too small, return required length
+            }
+            if required_len > 0 && out_ptr.is_null() {
+                return -1;
+            }
             unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), out_ptr, copy_len);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), out_ptr, required_len);
             }
             0 // success
         }
@@ -237,12 +339,18 @@ pub unsafe extern "C" fn mlxrs_to_f32_vec(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_numel(t: *mut mlx_tensor_t) -> i64 {
+    if t.is_null() {
+        return -1;
+    }
     let t = unsafe { ref_tensor(t) };
     t.numel()
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_ndim(t: *mut mlx_tensor_t) -> c_int {
+    if t.is_null() {
+        return -1;
+    }
     let t = unsafe { ref_tensor(t) };
     t.shape().ndim() as c_int
 }
@@ -253,13 +361,28 @@ pub unsafe extern "C" fn mlxrs_shape(
     out_ptr: *mut i64,
     out_len: size_t,
 ) -> c_int {
+    if t.is_null() {
+        return -1;
+    }
     let t = unsafe { ref_tensor(t) };
     let dims = &t.shape().0;
-    let copy_len = dims.len().min(out_len);
-    unsafe {
-        std::ptr::copy_nonoverlapping(dims.as_ptr(), out_ptr, copy_len);
+    let needed = dims.len();
+    if needed > (c_int::MAX as usize) {
+        return -3;
     }
-    0
+    if out_len == 0 {
+        return needed as c_int;
+    }
+    let copy_len = needed.min(out_len);
+    if copy_len > 0 && out_ptr.is_null() {
+        return -1;
+    }
+    unsafe { std::ptr::copy_nonoverlapping(dims.as_ptr(), out_ptr, copy_len) };
+    if out_len < needed {
+        needed as c_int // signal that buffer was too small
+    } else {
+        0
+    }
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
