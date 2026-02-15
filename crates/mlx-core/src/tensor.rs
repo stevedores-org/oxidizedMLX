@@ -102,6 +102,28 @@ impl Tensor {
         })
     }
 
+    /// Create a tensor from f32 data with a specified dtype.
+    ///
+    /// The data is stored as f32 internally; `dtype` records the logical type
+    /// (e.g. F16 weights that were converted to f32 on load).
+    pub fn from_data_with_dtype(
+        data: Vec<f32>,
+        shape: &Shape,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        Self::from_data(data, shape, dtype, device)
+    }
+
     fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
         let stream = default_stream();
         let meta = TensorMeta {
