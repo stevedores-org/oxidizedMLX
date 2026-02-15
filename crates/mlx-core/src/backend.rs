@@ -348,4 +348,22 @@ mod tests {
             "repeated eval should not increase call count"
         );
     }
+
+    #[test]
+    fn test_cache_len_updates() {
+        let s = fresh_stream();
+        assert_eq!(s.cache_len(), 0);
+
+        let a = s.add_constant(vec![1.0, 2.0], meta2());
+        let b = s.add_constant(vec![3.0, 4.0], meta2());
+        assert_eq!(s.cache_len(), 2);
+
+        let c = s.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            meta2(),
+        );
+        s.eval(c).unwrap();
+        assert_eq!(s.cache_len(), 3);
+    }
 }
