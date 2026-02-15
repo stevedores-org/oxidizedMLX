@@ -269,7 +269,7 @@ mod tests {
         let cache_after_first = s.cache_len();
         assert!(count_after_first > 0, "should have called backend");
         assert!(cache_after_first > 0, "should have cached buffers");
-        
+
         // Verify the computation result is correct
         assert_eq!(
             s.get_buffer(c).unwrap(),
@@ -330,11 +330,7 @@ mod tests {
             count_after_d,
             "c should already be cached from d's eval"
         );
-        assert_eq!(
-            s.cache_len(),
-            cache_after_d,
-            "cache should remain stable"
-        );
+        assert_eq!(s.cache_len(), cache_after_d, "cache should remain stable");
     }
 
     #[test]
@@ -367,7 +363,7 @@ mod tests {
         );
         let cache_after_first = s.cache_len();
         assert!(cache_after_first > 0, "should have cached buffers");
-        
+
         // Verify computation results:
         // b = a+a = [1+1, 2+2] = [2, 4]
         // c = a*a = [1*1, 2*2] = [1, 4]
@@ -399,7 +395,7 @@ mod tests {
             cache_after_first,
             "repeated eval should not change cache size"
         );
-        
+
         // Now eval just b to ensure it's still cached
         s.eval(b).unwrap();
         assert_eq!(
