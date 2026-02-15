@@ -33,6 +33,12 @@ Local CI equivalents:
 just ci
 ```
 
+Or, if you prefer `make`:
+
+```bash
+make lci
+```
+
 CLI smoke test:
 
 ```bash
