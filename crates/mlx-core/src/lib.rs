@@ -19,10 +19,12 @@
 pub mod backend;
 pub mod cpu_kernels;
 pub mod graph;
+pub mod schedule;
 pub mod tensor;
 pub mod types;
 
-pub use graph::NodeId;
+pub use graph::{NodeId, Graph};
+pub use schedule::{topo_schedule, Schedule};
 pub use tensor::{Device, Tensor};
 pub use types::{DType, Shape};
 
@@ -44,4 +46,13 @@ pub enum MlxError {
 
     #[error("Backend not available: {0}")]
     BackendUnavailable(&'static str),
+
+    #[error("shape error: {0}")]
+    Shape(&'static str),
+
+    #[error("backend error: {0}")]
+    Backend(&'static str),
+
+    #[error("graph error: {0}")]
+    Graph(&'static str),
 }

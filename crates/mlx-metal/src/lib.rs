@@ -2,9 +2,9 @@
 //!
 //! Provides a minimal Metal runtime for smoke testing GPU dispatch.
 
-use mlx_core::Result;
 #[cfg(not(target_os = "macos"))]
 use mlx_core::MlxError;
+use mlx_core::Result;
 
 #[cfg(target_os = "macos")]
 mod buffers;

@@ -1,15 +1,18 @@
-//! Backend trait and Stream — pluggable compute engine for tensor evaluation.
+//! Backend trait and Context — pluggable compute engine for tensor evaluation.
 //!
 //! A `Backend` knows how to execute a single graph node (op + inputs → output).
-//! A `Stream` binds a `Backend` to a lazy computation `Graph`, managing
+//! A `Context` binds a `Backend` to a lazy computation `Graph`, managing
 //! materialized buffers and evaluation scheduling.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::Result;
-use crate::graph::{Graph, Node, NodeId, OpKind, TensorMeta};
+use crate::graph::{Graph, GraphView, Node, NodeId, OpKind, TensorMeta};
 use crate::types::{DType, Shape};
+
+/// Materialized data buffer (currently just Vec<f32> for simplicity).
+pub type Materialized = Vec<f32>;
 
 /// Materialized input data passed to a backend for evaluation.
 pub struct NodeInput<'a> {
@@ -19,10 +22,6 @@ pub struct NodeInput<'a> {
 }
 
 /// Pluggable compute backend.
-///
-/// Backends evaluate individual graph nodes. The `Stream` handles scheduling
-/// (topological sort) and buffer management; the backend only needs to
-/// implement the actual kernel dispatch.
 pub trait Backend: Send + Sync {
     /// Evaluate a single op node given its materialized inputs.
     fn eval_node(
@@ -30,21 +29,50 @@ pub trait Backend: Send + Sync {
         op: &OpKind,
         inputs: &[NodeInput<'_>],
         output_meta: &TensorMeta,
-    ) -> Result<Vec<f32>>;
+    ) -> Result<Materialized>;
+
+    /// Realize a batch of nodes. 
+    /// Default implementation just calls eval_node in order, but backends can override.
+    fn realize(&self, graph: &dyn GraphView, nodes: &[NodeId], cache: &Mutex<HashMap<NodeId, Materialized>>) -> Result<Vec<Materialized>> {
+        let mut results = Vec::with_capacity(nodes.len());
+        for &nid in nodes {
+            let node = graph.node(nid);
+            
+            // Collect inputs from cache
+            let mut cache_lock = cache.lock().unwrap();
+            let mut inputs = Vec::with_capacity(node.inputs.len());
+            for &inp_id in &node.inputs {
+                let data = cache_lock.get(&inp_id).ok_or_else(|| {
+                    crate::MlxError::Backend("missing input in realize cache")
+                })?;
+                let meta = &graph.node(inp_id).meta;
+                inputs.push(NodeInput {
+                    data,
+                    shape: &meta.shape,
+                    dtype: meta.dtype,
+                });
+            }
+
+            let res = self.eval_node(&node.op, &inputs, &node.meta)?;
+            results.push(res.clone());
+            cache_lock.insert(nid, res);
+        }
+        Ok(results)
+    }
 }
 
-/// A computation stream binding a graph to a backend.
+/// A computation context binding a graph to a backend.
 ///
-/// Operations on tensors add nodes to the stream's graph lazily.
+/// Operations on tensors add nodes to the context's graph lazily.
 /// Calling `eval()` topologically sorts and evaluates pending nodes.
-pub struct Stream {
+pub struct Context {
     graph: Mutex<Graph>,
     backend: Box<dyn Backend>,
-    buffers: Mutex<HashMap<NodeId, Vec<f32>>>,
+    buffers: Mutex<HashMap<NodeId, Materialized>>,
 }
 
-impl Stream {
-    /// Create a new stream with the given backend.
+impl Context {
+    /// Create a new context with the given backend.
     pub fn new(backend: Box<dyn Backend>) -> Self {
         Self {
             graph: Mutex::new(Graph::new()),
@@ -54,7 +82,7 @@ impl Stream {
     }
 
     /// Add a constant node (data already known).
-    pub fn add_constant(&self, data: Vec<f32>, meta: TensorMeta) -> NodeId {
+    pub fn add_constant(&self, data: Materialized, meta: TensorMeta) -> NodeId {
         let mut graph = self.graph.lock().unwrap();
         let id = graph.add_node(OpKind::Constant, smallvec::SmallVec::new(), meta);
         let mut buffers = self.buffers.lock().unwrap();
@@ -75,82 +103,72 @@ impl Stream {
 
     /// Evaluate all nodes needed to materialize the given output.
     pub fn eval(&self, output: NodeId) -> Result<()> {
+        self.eval_many(&[output]).map(|_| ())
+    }
+
+    /// Evaluate multiple outputs efficiently with a topo schedule.
+    pub fn eval_many(&self, outputs: &[NodeId]) -> Result<Vec<Materialized>> {
         // Already materialized?
-        if self.buffers.lock().unwrap().contains_key(&output) {
-            return Ok(());
+        {
+            let buffers = self.buffers.lock().unwrap();
+            if outputs.iter().all(|&id| buffers.contains_key(&id)) {
+                return Ok(outputs
+                    .iter()
+                    .map(|&id| buffers.get(&id).unwrap().clone())
+                    .collect());
+            }
         }
 
-        // Topo-sort the subgraph rooted at `output`.
-        let order = {
+        // Topo-sort the subgraph rooted at `outputs`.
+        let sched = {
             let graph = self.graph.lock().unwrap();
-            graph.topo_sort(&[output])
+            crate::schedule::topo_schedule(&*graph, outputs)?
         };
 
-        // Evaluate each node in order. Never hold both locks simultaneously.
-        for &node_id in &order {
-            if self.buffers.lock().unwrap().contains_key(&node_id) {
-                continue;
+        // Determine which nodes actually need to be computed (not in buffers cache).
+        let mut to_compute = Vec::new();
+        {
+            let buffers = self.buffers.lock().unwrap();
+            for &nid in &sched.topo {
+                if !buffers.contains_key(&nid) {
+                    to_compute.push(nid);
+                }
             }
-
-            // Step 1: get node info (graph lock only).
-            let node: Node = {
-                let graph = self.graph.lock().unwrap();
-                graph
-                    .get(node_id)
-                    .cloned()
-                    .ok_or_else(|| crate::MlxError::InvalidArgument("missing graph node".into()))?
-            };
-
-            // Step 2: get input metadata from graph (graph lock only).
-            let input_metas: Vec<TensorMeta> = {
-                let graph = self.graph.lock().unwrap();
-                node.inputs
-                    .iter()
-                    .map(|&id| {
-                        graph
-                            .get(id)
-                            .expect("input node missing from graph")
-                            .meta
-                            .clone()
-                    })
-                    .collect()
-            };
-
-            // Step 3: gather input data + run backend (buffers lock only for reads).
-            let input_buffers: Vec<Vec<f32>> = {
-                let buffers = self.buffers.lock().unwrap();
-                node.inputs
-                    .iter()
-                    .map(|&id| {
-                        buffers
-                            .get(&id)
-                            .expect("input node should be evaluated before dependents")
-                            .clone()
-                    })
-                    .collect()
-            };
-
-            let inputs: Vec<NodeInput<'_>> = input_buffers
-                .iter()
-                .zip(input_metas.iter())
-                .map(|(data, meta)| NodeInput {
-                    data: data.as_slice(),
-                    shape: &meta.shape,
-                    dtype: meta.dtype,
-                })
-                .collect();
-
-            let result = self.backend.eval_node(&node.op, &inputs, &node.meta)?;
-
-            // Step 4: store result (buffers lock only for write).
-            self.buffers.lock().unwrap().insert(node_id, result);
         }
 
-        Ok(())
+        if !to_compute.is_empty() {
+            let mats = {
+                let graph = self.graph.lock().unwrap();
+                self.backend.realize(&*graph, &to_compute, &self.buffers)?
+            };
+
+            if mats.len() != to_compute.len() {
+                return Err(crate::MlxError::Backend(
+                    "backend returned wrong number of outputs",
+                ));
+            }
+
+            let mut buffers = self.buffers.lock().unwrap();
+            for (nid, mat) in to_compute.into_iter().zip(mats.into_iter()) {
+                buffers.insert(nid, mat);
+            }
+        }
+
+        // Return requested outputs from cache.
+        let buffers = self.buffers.lock().unwrap();
+        let mut out = Vec::with_capacity(outputs.len());
+        for &nid in outputs {
+            let m = buffers
+                .get(&nid)
+                .cloned()
+                .ok_or_else(|| crate::MlxError::Backend("missing cached output"))?;
+            out.push(m);
+        }
+        Ok(out)
     }
 
     /// Get materialized buffer data for a node (must call eval first).
-    pub fn get_buffer(&self, id: NodeId) -> Option<Vec<f32>> {
+    pub fn get_buffer(&self, id: NodeId) -> Option<Materialized> {
         self.buffers.lock().unwrap().get(&id).cloned()
     }
 
@@ -160,24 +178,26 @@ impl Stream {
     }
 
     /// Topological sort of the subgraph rooted at the given outputs.
-    pub fn topo_sort(&self, outputs: &[NodeId]) -> Vec<NodeId> {
-        self.graph.lock().unwrap().topo_sort(outputs)
+    pub fn topo_sort(&self, outputs: &[NodeId]) -> Result<Vec<NodeId>> {
+        let graph = self.graph.lock().unwrap();
+        let sched = crate::schedule::topo_schedule(&*graph, outputs)?;
+        Ok(sched.topo)
     }
 }
 
-impl std::fmt::Debug for Stream {
+impl std::fmt::Debug for Context {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Stream").finish_non_exhaustive()
+        f.debug_struct("Context").finish_non_exhaustive()
     }
 }
 
-/// The default stream using the built-in CPU reference backend.
-static DEFAULT_STREAM: LazyLock<Arc<Stream>> =
-    LazyLock::new(|| Arc::new(Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))));
+/// The default context using the built-in CPU reference backend.
+static DEFAULT_CONTEXT: LazyLock<Arc<Context>> =
+    LazyLock::new(|| Arc::new(Context::new(Box::new(crate::cpu_kernels::CpuRefBackend))));
 
-/// Get the default computation stream.
-pub fn default_stream() -> Arc<Stream> {
-    Arc::clone(&DEFAULT_STREAM)
+/// Get the default computation context.
+pub fn default_context() -> Arc<Context> {
+    Arc::clone(&DEFAULT_CONTEXT)
 }
 
 #[cfg(test)]
@@ -187,37 +207,37 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn test_stream_constant() {
-        let stream = default_stream();
-        let id = stream.add_constant(
+    fn test_context_constant() {
+        let ctx = default_context();
+        let id = ctx.add_constant(
             vec![1.0, 2.0, 3.0],
             TensorMeta {
                 shape: Shape::new(vec![3]),
                 dtype: DType::F32,
             },
         );
-        stream.eval(id).unwrap();
-        assert_eq!(stream.get_buffer(id).unwrap(), vec![1.0, 2.0, 3.0]);
+        ctx.eval(id).unwrap();
+        assert_eq!(ctx.get_buffer(id).unwrap(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
-    fn test_stream_add_op() {
-        let stream = default_stream();
-        let a = stream.add_constant(
+    fn test_context_add_op() {
+        let ctx = default_context();
+        let a = ctx.add_constant(
             vec![1.0, 2.0],
             TensorMeta {
                 shape: Shape::new(vec![2]),
                 dtype: DType::F32,
             },
         );
-        let b = stream.add_constant(
+        let b = ctx.add_constant(
             vec![3.0, 4.0],
             TensorMeta {
                 shape: Shape::new(vec![2]),
                 dtype: DType::F32,
             },
         );
-        let c = stream.add_op(
+        let c = ctx.add_op(
             OpKind::Add,
             smallvec::SmallVec::from_slice(&[a, b]),
             TensorMeta {
@@ -225,8 +245,8 @@ mod tests {
                 dtype: DType::F32,
             },
         );
-        stream.eval(c).unwrap();
-        assert_eq!(stream.get_buffer(c).unwrap(), vec![4.0, 6.0]);
+        ctx.eval(c).unwrap();
+        assert_eq!(ctx.get_buffer(c).unwrap(), vec![4.0, 6.0]);
     }
 
     #[test]
@@ -249,19 +269,19 @@ mod tests {
         }
 
         let calls = Arc::new(AtomicUsize::new(0));
-        let stream = Stream::new(Box::new(CountingBackend {
+        let ctx = Context::new(Box::new(CountingBackend {
             inner: crate::cpu_kernels::CpuRefBackend,
             calls: Arc::clone(&calls),
         }));
 
-        let a = stream.add_constant(
+        let a = ctx.add_constant(
             vec![1.0, 2.0],
             TensorMeta {
                 shape: Shape::new(vec![2]),
                 dtype: DType::F32,
             },
         );
-        let b = stream.add_constant(
+        let b = ctx.add_constant(
             vec![3.0, 4.0],
             TensorMeta {
                 shape: Shape::new(vec![2]),
@@ -270,7 +290,7 @@ mod tests {
         );
 
         // Two op nodes: add then neg
-        let add = stream.add_op(
+        let add = ctx.add_op(
             OpKind::Add,
             smallvec::SmallVec::from_slice(&[a, b]),
             TensorMeta {
@@ -278,7 +298,7 @@ mod tests {
                 dtype: DType::F32,
             },
         );
-        let out = stream.add_op(
+        let out = ctx.add_op(
             OpKind::Neg,
             smallvec::SmallVec::from_slice(&[add]),
             TensorMeta {
@@ -287,18 +307,18 @@ mod tests {
             },
         );
 
-        stream.eval(out).unwrap();
+        ctx.eval(out).unwrap();
         let after_first = calls.load(Ordering::Relaxed);
         assert_eq!(after_first, 2);
-        assert_eq!(stream.get_buffer(out).unwrap(), vec![-4.0, -6.0]);
+        assert_eq!(ctx.get_buffer(out).unwrap(), vec![-4.0, -6.0]);
 
         // Repeated eval should not call into the backend again.
-        stream.eval(out).unwrap();
+        ctx.eval(out).unwrap();
         let after_second = calls.load(Ordering::Relaxed);
         assert_eq!(after_first, after_second);
 
         // Evaluating already-materialized intermediates should also be a no-op.
-        stream.eval(add).unwrap();
+        ctx.eval(add).unwrap();
         let after_third = calls.load(Ordering::Relaxed);
         assert_eq!(after_second, after_third);
     }

@@ -9,7 +9,7 @@ mod vjp;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mlx_core::backend::Stream;
+use mlx_core::backend::Context;
 use mlx_core::graph::{Node, OpKind};
 use mlx_core::{Device, MlxError, NodeId, Result, Tensor};
 
@@ -51,26 +51,26 @@ where
 
 /// Reverse-mode backward pass.
 fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
-    let stream = loss.stream();
-    let order = stream.topo_sort(&[loss.node_id()]);
+    let ctx = loss.ctx();
+    let order = ctx.topo_sort(&[loss.id()])?;
 
     let mut grads: HashMap<NodeId, Tensor> = HashMap::new();
-    grads.insert(loss.node_id(), seed);
+    grads.insert(loss.id(), seed);
 
-    for &node_id in order.iter().rev() {
-        let grad_output = match grads.remove(&node_id) {
+    for &id in order.iter().rev() {
+        let grad_output = match grads.remove(&id) {
             Some(g) => g,
             None => continue,
         };
 
-        let node = match stream.get_node(node_id) {
+        let node = match ctx.get_node(id) {
             Some(n) => n,
             None => continue,
         };
 
         // Source nodes don't have inputs to propagate to, but keep their grad.
         if matches!(node.op, OpKind::Constant | OpKind::Parameter) {
-            grads.insert(node_id, grad_output);
+            grads.insert(id, grad_output);
             continue;
         }
 
@@ -78,18 +78,18 @@ fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
         let input_tensors: Vec<Tensor> = node
             .inputs
             .iter()
-            .map(|&id| tensor_from_node(&stream, id, loss.device()))
+            .map(|&id| tensor_from_node(&ctx, id, loss.device()))
             .collect::<Result<Vec<_>>>()?;
 
         let output_tensor =
-            tensor_from_node_info(&node, node_id, loss.device(), Arc::clone(&stream));
+            tensor_from_node_info(&node, id, loss.device(), Arc::clone(&ctx));
 
         // Compute VJPs for this op.
         let input_grads = vjp::vjp(&node.op, &input_tensors, &output_tensor, &grad_output)?;
 
         // Accumulate into grad table.
         for (inp, ig) in input_tensors.iter().zip(input_grads) {
-            let id = inp.node_id();
+            let id = inp.id();
             match grads.remove(&id) {
                 Some(existing) => {
                     grads.insert(id, existing.add(&ig)?);
@@ -101,38 +101,38 @@ fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
         }
     }
 
-    grads.remove(&wrt.node_id()).ok_or_else(|| {
+    grads.remove(&wrt.id()).ok_or_else(|| {
         MlxError::InvalidArgument("gradient not found — input may not affect the loss".into())
     })
 }
 
-/// Create a Tensor handle from a node ID by looking up its metadata in the stream.
-fn tensor_from_node(stream: &Arc<Stream>, id: NodeId, device: &Device) -> Result<Tensor> {
-    let node = stream
+/// Create a Tensor handle from a node ID by looking up its metadata in the context.
+fn tensor_from_node(ctx: &Arc<Context>, id: NodeId, device: &Device) -> Result<Tensor> {
+    let node = ctx
         .get_node(id)
         .ok_or_else(|| MlxError::InvalidArgument(format!("node {:?} not found in graph", id)))?;
-    Ok(Tensor::from_node_id(
+    Ok(Tensor::from_id(
         id,
         node.meta.shape.clone(),
         node.meta.dtype,
         device.clone(),
-        Arc::clone(stream),
+        Arc::clone(ctx),
     ))
 }
 
 /// Create a Tensor handle directly from a Node (avoids extra graph lookup).
 fn tensor_from_node_info(
     node: &Node,
-    node_id: NodeId,
+    id: NodeId,
     device: &Device,
-    stream: Arc<Stream>,
+    ctx: Arc<Context>,
 ) -> Tensor {
-    Tensor::from_node_id(
-        node_id,
+    Tensor::from_id(
+        id,
         node.meta.shape.clone(),
         node.meta.dtype,
         device.clone(),
-        stream,
+        ctx,
     )
 }
 

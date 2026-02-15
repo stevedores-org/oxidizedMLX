@@ -94,6 +94,21 @@ pub struct Graph {
     next_id: u64,
 }
 
+/// Read-only view of a computation graph for scheduling.
+pub trait GraphView {
+    fn node(&self, id: NodeId) -> &Node;
+    fn contains(&self, id: NodeId) -> bool;
+}
+
+impl GraphView for Graph {
+    fn node(&self, id: NodeId) -> &Node {
+        self.get(id).expect("node not found in graph")
+    }
+    fn contains(&self, id: NodeId) -> bool {
+        self.get(id).is_some()
+    }
+}
+
 impl Graph {
     pub fn new() -> Self {
         Self::default()

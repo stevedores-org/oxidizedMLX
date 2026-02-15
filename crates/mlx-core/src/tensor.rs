@@ -2,13 +2,13 @@
 //!
 //! Operations on tensors record nodes in the graph. Actual computation is
 //! deferred until `eval()` (or `to_vec_f32()`) is called, at which point the
-//! stream topologically sorts the subgraph and dispatches to the backend.
+//! ctx topologically sorts the subgraph and dispatches to the backend.
 
 use std::sync::Arc;
 
 use smallvec::SmallVec;
 
-use crate::backend::{Stream, default_stream};
+use crate::backend::{Context, default_context};
 use crate::graph::{OpKind, TensorMeta};
 use crate::{DType, MlxError, NodeId, Result, Shape};
 
@@ -40,11 +40,11 @@ impl Device {
 /// happens when `eval()` is called (or implicitly via `to_vec_f32()`).
 #[derive(Clone)]
 pub struct Tensor {
-    node_id: NodeId,
+    id: NodeId,
     shape: Shape,
     dtype: DType,
     device: Device,
-    stream: Arc<Stream>,
+    ctx: Arc<Context>,
 }
 
 impl Tensor {
@@ -77,18 +77,18 @@ impl Tensor {
     }
 
     fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
-        let stream = default_stream();
+        let ctx = default_context();
         let meta = TensorMeta {
             shape: shape.clone(),
             dtype,
         };
-        let node_id = stream.add_constant(data, meta);
+        let id = ctx.add_constant(data, meta);
         Ok(Self {
-            node_id,
+            id,
             shape: shape.clone(),
             dtype,
             device: device.clone(),
-            stream,
+            ctx,
         })
     }
 
@@ -103,13 +103,13 @@ impl Tensor {
             shape: shape.clone(),
             dtype,
         };
-        let node_id = self.stream.add_op(op, inputs, meta);
+        let id = self.ctx.add_op(op, inputs, meta);
         Tensor {
-            node_id,
+            id,
             shape,
             dtype,
             device: self.device.clone(),
-            stream: Arc::clone(&self.stream),
+            ctx: Arc::clone(&self.ctx),
         }
     }
 
@@ -125,7 +125,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::Add,
-            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            SmallVec::from_slice(&[self.id, rhs.id]),
             self.shape.clone(),
             self.dtype,
         ))
@@ -141,7 +141,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::Sub,
-            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            SmallVec::from_slice(&[self.id, rhs.id]),
             self.shape.clone(),
             self.dtype,
         ))
@@ -157,7 +157,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::Mul,
-            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            SmallVec::from_slice(&[self.id, rhs.id]),
             self.shape.clone(),
             self.dtype,
         ))
@@ -173,7 +173,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::Div,
-            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            SmallVec::from_slice(&[self.id, rhs.id]),
             self.shape.clone(),
             self.dtype,
         ))
@@ -183,7 +183,7 @@ impl Tensor {
     pub fn neg(&self) -> Tensor {
         self.lazy_op(
             OpKind::Neg,
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             self.shape.clone(),
             self.dtype,
         )
@@ -207,7 +207,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::Sum { axis: Some(axis) },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             Shape::new(new_dims),
             self.dtype,
         ))
@@ -217,7 +217,7 @@ impl Tensor {
     pub fn sum_all(&self) -> Result<Tensor> {
         Ok(self.lazy_op(
             OpKind::Sum { axis: None },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             Shape::new(vec![1]),
             self.dtype,
         ))
@@ -244,7 +244,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::MatMul,
-            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            SmallVec::from_slice(&[self.id, rhs.id]),
             Shape::new(vec![m, n]),
             self.dtype,
         ))
@@ -264,7 +264,7 @@ impl Tensor {
             OpKind::Reshape {
                 new_shape: new_shape.clone(),
             },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             new_shape.clone(),
             self.dtype,
         ))
@@ -286,7 +286,7 @@ impl Tensor {
         let new_dims: Vec<i64> = perm.iter().map(|&ax| self.shape.0[ax]).collect();
         Ok(self.lazy_op(
             OpKind::Transpose { axes: Some(perm) },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             Shape::new(new_dims),
             self.dtype,
         ))
@@ -305,7 +305,7 @@ impl Tensor {
         }
         Ok(self.lazy_op(
             OpKind::Softmax { axis },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             self.shape.clone(),
             self.dtype,
         ))
@@ -315,7 +315,7 @@ impl Tensor {
     pub fn silu(&self) -> Tensor {
         self.lazy_op(
             OpKind::Silu,
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             self.shape.clone(),
             self.dtype,
         )
@@ -325,7 +325,7 @@ impl Tensor {
     pub fn gelu(&self) -> Tensor {
         self.lazy_op(
             OpKind::Gelu,
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             self.shape.clone(),
             self.dtype,
         )
@@ -337,7 +337,7 @@ impl Tensor {
     pub fn layer_norm(&self, eps: f32) -> Tensor {
         self.lazy_op(
             OpKind::LayerNorm { eps },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             self.shape.clone(),
             self.dtype,
         )
@@ -347,7 +347,7 @@ impl Tensor {
     pub fn rms_norm(&self, eps: f32) -> Tensor {
         self.lazy_op(
             OpKind::RmsNorm { eps },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             self.shape.clone(),
             self.dtype,
         )
@@ -357,14 +357,14 @@ impl Tensor {
 
     /// Materialize the tensor — triggers evaluation of the computation graph.
     pub fn eval(&self) -> Result<()> {
-        self.stream.eval(self.node_id)
+        self.ctx.eval(self.id)
     }
 
     /// Copy data out as Vec<f32>. Triggers evaluation if needed.
     pub fn to_vec_f32(&self) -> Result<Vec<f32>> {
         self.eval()?;
-        self.stream
-            .get_buffer(self.node_id)
+        self.ctx
+            .get_buffer(self.id)
             .ok_or_else(|| MlxError::InvalidArgument("buffer not found after eval".into()))
     }
 
@@ -391,31 +391,31 @@ impl Tensor {
     }
 
     /// Get the graph node ID.
-    pub fn node_id(&self) -> NodeId {
-        self.node_id
+    pub fn id(&self) -> NodeId {
+        self.id
     }
 
-    /// Get the stream this tensor belongs to.
-    pub fn stream(&self) -> Arc<Stream> {
-        Arc::clone(&self.stream)
+    /// Get the ctx this tensor belongs to.
+    pub fn ctx(&self) -> Arc<Context> {
+        Arc::clone(&self.ctx)
     }
 
     /// Reconstruct a tensor handle from a node ID and metadata.
     ///
     /// Used by autograd to create handles for graph introspection.
-    pub fn from_node_id(
-        node_id: NodeId,
+    pub fn from_id(
+        id: NodeId,
         shape: Shape,
         dtype: DType,
         device: Device,
-        stream: Arc<Stream>,
+        ctx: Arc<Context>,
     ) -> Self {
         Self {
-            node_id,
+            id,
             shape,
             dtype,
             device,
-            stream,
+            ctx,
         }
     }
 
@@ -448,7 +448,7 @@ impl Tensor {
             OpKind::Broadcast {
                 target_shape: target.clone(),
             },
-            SmallVec::from_slice(&[self.node_id]),
+            SmallVec::from_slice(&[self.id]),
             target.clone(),
             self.dtype,
         ))

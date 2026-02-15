@@ -6,7 +6,7 @@
 
 pub use mlx_core::cpu_kernels::CpuRefBackend;
 
-/// Create a new [`mlx_core::backend::Stream`] backed by the CPU reference backend.
-pub fn cpu_stream() -> std::sync::Arc<mlx_core::backend::Stream> {
-    std::sync::Arc::new(mlx_core::backend::Stream::new(Box::new(CpuRefBackend)))
+/// Create a new [`mlx_core::backend::Context`] backed by the CPU reference backend.
+pub fn cpu_context() -> std::sync::Arc<mlx_core::backend::Context> {
+    std::sync::Arc::new(mlx_core::backend::Context::new(Box::new(CpuRefBackend)))
 }
