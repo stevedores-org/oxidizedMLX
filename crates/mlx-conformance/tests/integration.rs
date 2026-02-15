@@ -20,7 +20,7 @@ fn test_end_to_end_sgd_linear_regression() {
     // W shape: [out, in] = [1, 1]
     let w_init = Tensor::zeros(&Shape::new(vec![1, 1]), mlx_core::DType::F32, &device).unwrap();
     let b_init = Tensor::zeros(&Shape::new(vec![1]), mlx_core::DType::F32, &device).unwrap();
-    
+
     // Parameters (W is 0.0, true is 3.0; B is 0.0, true is 2.0)
     let mut w = w_init;
     let mut b = b_init;
@@ -31,28 +31,36 @@ fn test_end_to_end_sgd_linear_regression() {
 
     for _epoch in 0..1000 {
         // Compute grad for W (treating b as constant for this backward pass)
-        let (_, dw) = value_and_grad(|w_arg| {
-            // Forward: y = x @ w.T + b
-            let w_t = w_arg.transpose(None)?; 
-            // Explicit broadcast b to match batch size
-            let b_broadcast = b.broadcast_to(&Shape::new(vec![4, 1]))?;
-            let y_pred = x.matmul(&w_t)?.add(&b_broadcast)?;
-            let diff = y_pred.sub(&y)?;
-            let sq = diff.mul(&diff)?;
-            let mse = sq.sum_all()?.div(&n_tensor)?;
-            Ok(mse)
-        }, &w).unwrap();
-        
+        let (_, dw) = value_and_grad(
+            |w_arg| {
+                // Forward: y = x @ w.T + b
+                let w_t = w_arg.transpose(None)?;
+                // Explicit broadcast b to match batch size
+                let b_broadcast = b.broadcast_to(&Shape::new(vec![4, 1]))?;
+                let y_pred = x.matmul(&w_t)?.add(&b_broadcast)?;
+                let diff = y_pred.sub(&y)?;
+                let sq = diff.mul(&diff)?;
+                let mse = sq.sum_all()?.div(&n_tensor)?;
+                Ok(mse)
+            },
+            &w,
+        )
+        .unwrap();
+
         // Compute grad for b (treating w as constant)
-        let (_, db) = value_and_grad(|b_arg| {
-            let w_t = w.transpose(None)?;
-            let b_broadcast = b_arg.broadcast_to(&Shape::new(vec![4, 1]))?;
-            let y_pred = x.matmul(&w_t)?.add(&b_broadcast)?;
-            let diff = y_pred.sub(&y)?;
-            let sq = diff.mul(&diff)?;
-            let mse = sq.sum_all()?.div(&n_tensor)?;
-            Ok(mse)
-        }, &b).unwrap();
+        let (_, db) = value_and_grad(
+            |b_arg| {
+                let w_t = w.transpose(None)?;
+                let b_broadcast = b_arg.broadcast_to(&Shape::new(vec![4, 1]))?;
+                let y_pred = x.matmul(&w_t)?.add(&b_broadcast)?;
+                let diff = y_pred.sub(&y)?;
+                let sq = diff.mul(&diff)?;
+                let mse = sq.sum_all()?.div(&n_tensor)?;
+                Ok(mse)
+            },
+            &b,
+        )
+        .unwrap();
 
         // Update W: w = w - lr * dw
         let lr_w = lr_tensor.broadcast_to(w.shape()).unwrap();
@@ -79,6 +87,14 @@ fn test_end_to_end_sgd_linear_regression() {
     // Expected: W ~ 3.0, b ~ 2.0
     // With 50 epochs lr=0.01, it should be close.
     // Let's assert strictly enough to prove learning roughly occurred.
-    assert!((w_final - 3.0).abs() < 0.5, "W should be ~3.0, got {}", w_final);
-    assert!((b_final - 2.0).abs() < 0.5, "b should be ~2.0, got {}", b_final);
+    assert!(
+        (w_final - 3.0).abs() < 0.5,
+        "W should be ~3.0, got {}",
+        w_final
+    );
+    assert!(
+        (b_final - 2.0).abs() < 0.5,
+        "b should be ~2.0, got {}",
+        b_final
+    );
 }
