@@ -353,6 +353,28 @@ impl Tensor {
         )
     }
 
+    // ── Backward (VJP) helpers ─────────────────────────────────────────
+
+    /// LayerNorm VJP: compute grad_input given grad_output and original input.
+    pub fn layer_norm_vjp(&self, input: &Tensor, eps: f32) -> Tensor {
+        self.lazy_op(
+            OpKind::LayerNormVjp { eps },
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        )
+    }
+
+    /// RmsNorm VJP: compute grad_input given grad_output and original input.
+    pub fn rms_norm_vjp(&self, input: &Tensor, eps: f32) -> Tensor {
+        self.lazy_op(
+            OpKind::RmsNormVjp { eps },
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        )
+    }
+
     // ── Materialization ─────────────────────────────────────────────────
 
     /// Materialize the tensor — triggers evaluation of the computation graph.
