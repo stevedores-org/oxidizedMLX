@@ -35,7 +35,12 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Unary ops preserve shape.
-        OpKind::Neg | OpKind::Silu | OpKind::Gelu | OpKind::Constant | OpKind::Parameter => {
+        OpKind::Neg
+        | OpKind::Silu
+        | OpKind::Gelu
+        | OpKind::Constant
+        | OpKind::Parameter
+        | OpKind::RoPE { .. } => {
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
@@ -320,5 +325,46 @@ mod tests {
         let a = s(&[4, 8]);
         let result = infer_shape(&OpKind::LayerNorm { eps: 1e-5 }, &[&a]).unwrap();
         assert_eq!(result, s(&[4, 8]));
+    }
+
+    #[test]
+    fn test_transpose_validation() {
+        let a = s(&[2, 3]);
+
+        // Missing axis
+        let res = infer_shape(
+            &OpKind::Transpose {
+                axes: Some(vec![0]),
+            },
+            &[&a],
+        );
+        assert!(res.is_err());
+
+        // Duplicate axis
+        let res = infer_shape(
+            &OpKind::Transpose {
+                axes: Some(vec![0, 0]),
+            },
+            &[&a],
+        );
+        assert!(res.is_err());
+
+        // Out of bounds axis
+        let res = infer_shape(
+            &OpKind::Transpose {
+                axes: Some(vec![0, 5]),
+            },
+            &[&a],
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_reshape_validation() {
+        let a = s(&[2, 3]); // numel = 6
+        let new_shape = s(&[2, 4]); // numel = 8
+
+        let res = infer_shape(&OpKind::Reshape { new_shape }, &[&a]);
+        assert!(res.is_err());
     }
 }
