@@ -1,9 +1,3 @@
-/// Metal Shading Language source for GEMM (f32).
-///
-/// Contains two kernels:
-/// - `naive_gemm_f32`: one thread per output element, simple K-loop (correctness baseline)
-/// - `tiled_gemm_f32`: 16×16 threadgroup tiles with shared memory (performance kernel)
-pub const GEMM_F32_SOURCE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -30,7 +24,7 @@ kernel void naive_gemm_f32(device const float* A   [[buffer(0)]],
     Out[row * p.N + col] = acc;
 }
 
-// Tiled GEMM: 16×16 tiles loaded into threadgroup shared memory.
+// Tiled GEMM: 16x16 tiles loaded into threadgroup shared memory.
 constant uint TM = 16;
 constant uint TN = 16;
 constant uint TK = 16;
@@ -54,15 +48,19 @@ kernel void tiled_gemm_f32(device const float* A   [[buffer(0)]],
     for (uint t = 0; t < num_tiles; t++) {
         // Load A tile: row from global row, col from tile offset
         uint a_col = t * TK + local_id.x;
-        As[local_id.y][local_id.x] = (row < p.M && a_col < p.K)
-            ? A[row * p.K + a_col]
-            : 0.0f;
+        if (row < p.M && a_col < p.K) {
+            As[local_id.y][local_id.x] = A[row * p.K + a_col];
+        } else {
+            As[local_id.y][local_id.x] = 0.0f;
+        }
 
         // Load B tile: row from tile offset, col from global col
         uint b_row = t * TK + local_id.y;
-        Bs[local_id.y][local_id.x] = (b_row < p.K && col < p.N)
-            ? B[b_row * p.N + col]
-            : 0.0f;
+        if (b_row < p.K && col < p.N) {
+            Bs[local_id.y][local_id.x] = B[b_row * p.N + col];
+        } else {
+            Bs[local_id.y][local_id.x] = 0.0f;
+        }
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -76,14 +74,4 @@ kernel void tiled_gemm_f32(device const float* A   [[buffer(0)]],
     if (row < p.M && col < p.N) {
         Out[row * p.N + col] = acc;
     }
-}
-"#;
-
-/// Parameters passed to the GEMM kernel via constant buffer (buffer 3).
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct GemmParams {
-    pub m: u32,
-    pub n: u32,
-    pub k: u32,
 }

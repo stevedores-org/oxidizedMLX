@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 #[cfg(target_os = "macos")]
 use mlx_core::graph::{OpKind, TensorMeta};
 #[cfg(target_os = "macos")]

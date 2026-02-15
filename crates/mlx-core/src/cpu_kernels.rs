@@ -59,6 +59,8 @@ impl Backend for CpuRefBackend {
             OpKind::LayerNorm { eps } => layer_norm(inputs, *eps, output_meta),
             OpKind::RmsNorm { eps } => rms_norm(inputs, *eps, output_meta),
             OpKind::Broadcast { target_shape } => broadcast(inputs, target_shape),
+            OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
+            OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
         }
     }
 }
@@ -332,6 +334,120 @@ fn broadcast(inputs: &[NodeInput<'_>], target_shape: &crate::Shape) -> Result<Ve
             }
         }
         *out = a.data[in_flat];
+    }
+    Ok(result)
+}
+
+/// LayerNorm backward: inputs = [grad_output, original_input].
+///
+/// For x of shape [..., D] (normalized over last dim, no affine params):
+///   x_hat = (x - mean) / std
+///   dx_i = (1/std) * (dy_i - mean(dy) - x_hat_i * mean(dy * x_hat))
+fn layer_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let x = require_input(inputs, 1)?;
+    if dy.shape != x.shape || dy.data.len() != x.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: x.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    let ndim = x.shape.ndim();
+    if ndim == 0 {
+        return Ok(dy.data.to_vec());
+    }
+    let d = x.shape.0[ndim - 1] as usize;
+    if d == 0 || x.data.is_empty() {
+        return Ok(vec![0.0f32; x.data.len()]);
+    }
+    let d_f = d as f32;
+    let outer = x.data.len() / d;
+
+    let mut result = vec![0.0f32; x.data.len()];
+    for o in 0..outer {
+        let start = o * d;
+        let end = start + d;
+        let x_slice = &x.data[start..end];
+        let dy_slice = &dy.data[start..end];
+
+        // Forward recomputation
+        let mean = x_slice.iter().sum::<f32>() / d_f;
+        let var = x_slice.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / d_f;
+        let std = (var + eps).sqrt();
+        let inv_std = 1.0 / std;
+
+        // x_hat = (x - mean) / std
+        let x_hat: Vec<f32> = x_slice.iter().map(|v| (v - mean) * inv_std).collect();
+
+        // mean(dy) and mean(dy * x_hat)
+        let mean_dy = dy_slice.iter().sum::<f32>() / d_f;
+        let mean_dy_xhat: f32 = dy_slice
+            .iter()
+            .zip(x_hat.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f32>()
+            / d_f;
+
+        // dx_i = inv_std * (dy_i - mean_dy - x_hat_i * mean_dy_xhat)
+        for i in 0..d {
+            result[start + i] = inv_std * (dy_slice[i] - mean_dy - x_hat[i] * mean_dy_xhat);
+        }
+    }
+    Ok(result)
+}
+
+/// RmsNorm backward: inputs = [grad_output, original_input].
+///
+/// For x of shape [..., D] (normalized over last dim, no affine params):
+///   rms = sqrt(mean(x^2) + eps)
+///   y = x / rms
+///   dx_i = (1/rms) * (dy_i - y_i * mean(dy * y))
+fn rms_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let x = require_input(inputs, 1)?;
+    if dy.shape != x.shape || dy.data.len() != x.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: x.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    let ndim = x.shape.ndim();
+    if ndim == 0 {
+        return Ok(dy.data.to_vec());
+    }
+    let d = x.shape.0[ndim - 1] as usize;
+    if d == 0 || x.data.is_empty() {
+        return Ok(vec![0.0f32; x.data.len()]);
+    }
+    let d_f = d as f32;
+    let outer = x.data.len() / d;
+
+    let mut result = vec![0.0f32; x.data.len()];
+    for o in 0..outer {
+        let start = o * d;
+        let end = start + d;
+        let x_slice = &x.data[start..end];
+        let dy_slice = &dy.data[start..end];
+
+        // Forward recomputation
+        let rms = (x_slice.iter().map(|v| v * v).sum::<f32>() / d_f + eps).sqrt();
+        let inv_rms = 1.0 / rms;
+
+        // y = x / rms
+        let y: Vec<f32> = x_slice.iter().map(|v| v * inv_rms).collect();
+
+        // mean(dy * y)
+        let mean_dy_y: f32 = dy_slice
+            .iter()
+            .zip(y.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f32>()
+            / d_f;
+
+        // dx_i = inv_rms * (dy_i - y_i * mean_dy_y)
+        for i in 0..d {
+            result[start + i] = inv_rms * (dy_slice[i] - y[i] * mean_dy_y);
+        }
     }
     Ok(result)
 }

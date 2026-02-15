@@ -1,7 +1,7 @@
 //! C ABI shim for MLX tensor operations.
 //!
 //! With the default `native` feature, all `mlxrs_*` functions are implemented
-//! in pure Rust using the `mlx-core` tensor API. With the `cpp` feature, they
+//! in pure Rust using the `mlx-core` tensor API. With the `ffi` feature, they
 //! link against the external MLX C++ library built via cmake.
 
 #![allow(non_camel_case_types)]
@@ -10,7 +10,7 @@
 compile_error!("features `native` and `cpp` are mutually exclusive");
 
 // libc types re-exported for cpp feature extern declarations.
-#[cfg(feature = "cpp")]
+#[cfg(feature = "ffi")]
 use libc::{c_int, size_t};
 
 // ── Opaque handle types ─────────────────────────────────────────────────
@@ -48,7 +48,7 @@ pub enum mlx_dtype_t {
 
 // ── C++ FFI declarations (enabled with `cpp` feature) ───────────────────
 
-#[cfg(feature = "cpp")]
+#[cfg(feature = "ffi")]
 extern "C" {
     pub fn mlxrs_default_device() -> *mut mlx_device_t;
     pub fn mlxrs_device_type(d: *mut mlx_device_t) -> mlx_device_type_t;
@@ -97,10 +97,13 @@ extern "C" {
 
 // ── Pure-Rust native implementation (enabled with `native` feature) ─────
 
-#[cfg(feature = "native")]
+// If both `native` and `ffi` are enabled (e.g. `--features ffi` without
+// `--no-default-features`), prefer the external backend by disabling the
+// native implementation.
+#[cfg(all(feature = "native", not(feature = "ffi")))]
 mod native_impl;
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(feature = "ffi")))]
 pub use native_impl::*;
 
 #[cfg(all(test, feature = "native"))]

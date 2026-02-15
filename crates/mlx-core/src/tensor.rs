@@ -206,7 +206,7 @@ impl Tensor {
             new_dims.push(1);
         }
         Ok(self.lazy_op(
-            OpKind::Sum { axis: Some(axis) },
+            OpKind::Sum { axis: Some(ax) },
             SmallVec::from_slice(&[self.node_id]),
             Shape::new(new_dims),
             self.dtype,
@@ -351,6 +351,60 @@ impl Tensor {
             self.shape.clone(),
             self.dtype,
         )
+    }
+
+    // ── Backward (VJP) helpers ─────────────────────────────────────────
+
+    /// LayerNorm VJP: compute grad_input given grad_output and original input.
+    pub fn layer_norm_vjp(&self, input: &Tensor, eps: f32) -> Result<Tensor> {
+        if self.shape != input.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: input.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "layer_norm_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "layer_norm_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::LayerNormVjp { eps },
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        ))
+    }
+
+    /// RmsNorm VJP: compute grad_input given grad_output and original input.
+    pub fn rms_norm_vjp(&self, input: &Tensor, eps: f32) -> Result<Tensor> {
+        if self.shape != input.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: input.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "rms_norm_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "rms_norm_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::RmsNormVjp { eps },
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        ))
     }
 
     // ── Materialization ─────────────────────────────────────────────────
