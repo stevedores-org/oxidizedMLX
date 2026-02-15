@@ -20,7 +20,11 @@ fn run_matmul_parity(m: i64, k: i64, n: i64) {
         |s| {
             let na = s.add_constant(a.clone(), a_meta.clone());
             let nb = s.add_constant(b.clone(), b_meta.clone());
-            s.add_op(OpKind::MatMul, SmallVec::from_slice(&[na, nb]), out_meta.clone())
+            s.add_op(
+                OpKind::MatMul,
+                SmallVec::from_slice(&[na, nb]),
+                out_meta.clone(),
+            )
         },
         ATOL,
         RTOL,

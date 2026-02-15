@@ -24,7 +24,9 @@ pub fn gen_data(n: usize, seed: u64) -> Vec<f32> {
     (0..n)
         .map(|_| {
             // LCG: Numerical Recipes parameters
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             // Map to [-1, 1]
             ((state >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0) as f32
         })
@@ -103,7 +105,7 @@ mod tests {
     fn test_gen_data_range() {
         let data = gen_data(10000, 1);
         for &x in &data {
-            assert!(x >= -1.0 && x <= 1.0, "value {x} out of range");
+            assert!((-1.0..=1.0).contains(&x), "value {x} out of range");
         }
     }
 

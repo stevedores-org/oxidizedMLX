@@ -12,28 +12,44 @@ const ACT_RTOL: f32 = 1e-5;
 fn parity_silu_1d() {
     let a = gen_data(256, 60);
     let m = meta(&[256]);
-    run_parity(|s| unary_op(s, OpKind::Silu, &a, m.clone()), ACT_ATOL, ACT_RTOL);
+    run_parity(
+        |s| unary_op(s, OpKind::Silu, &a, m.clone()),
+        ACT_ATOL,
+        ACT_RTOL,
+    );
 }
 
 #[test]
 fn parity_silu_2d() {
     let a = gen_data(32 * 64, 61);
     let m = meta(&[32, 64]);
-    run_parity(|s| unary_op(s, OpKind::Silu, &a, m.clone()), ACT_ATOL, ACT_RTOL);
+    run_parity(
+        |s| unary_op(s, OpKind::Silu, &a, m.clone()),
+        ACT_ATOL,
+        ACT_RTOL,
+    );
 }
 
 #[test]
 fn parity_gelu_1d() {
     let a = gen_data(256, 62);
     let m = meta(&[256]);
-    run_parity(|s| unary_op(s, OpKind::Gelu, &a, m.clone()), ACT_ATOL, ACT_RTOL);
+    run_parity(
+        |s| unary_op(s, OpKind::Gelu, &a, m.clone()),
+        ACT_ATOL,
+        ACT_RTOL,
+    );
 }
 
 #[test]
 fn parity_gelu_2d() {
     let a = gen_data(32 * 64, 63);
     let m = meta(&[32, 64]);
-    run_parity(|s| unary_op(s, OpKind::Gelu, &a, m.clone()), ACT_ATOL, ACT_RTOL);
+    run_parity(
+        |s| unary_op(s, OpKind::Gelu, &a, m.clone()),
+        ACT_ATOL,
+        ACT_RTOL,
+    );
 }
 
 #[test]

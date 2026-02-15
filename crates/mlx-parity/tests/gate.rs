@@ -156,7 +156,17 @@ fn backend_parity_gate() {
         let m = meta(&[tq as i64, tk as i64]);
         let scale = 1.0 / (tk as f32).sqrt();
         run_parity(
-            |s| unary_op(s, OpKind::ScaledMaskedSoftmax { scale, causal: true }, &a, m.clone()),
+            |s| {
+                unary_op(
+                    s,
+                    OpKind::ScaledMaskedSoftmax {
+                        scale,
+                        causal: true,
+                    },
+                    &a,
+                    m.clone(),
+                )
+            },
             1e-3,
             1e-3,
         );
