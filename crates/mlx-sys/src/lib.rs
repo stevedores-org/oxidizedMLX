@@ -313,4 +313,25 @@ mod tests {
             mlxrs_free_tensor(product);
         }
     }
+
+    #[test]
+    fn test_free_null_is_noop() {
+        unsafe {
+            mlxrs_free_tensor(std::ptr::null_mut());
+            mlxrs_free_device(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn test_tensor_lifecycle_stress() {
+        // This doesn't prove "no leaks", but it validates the basic lifecycle
+        // contract and catches obvious double-free / UAF bugs as crashes.
+        unsafe {
+            for _ in 0..10_000 {
+                let t = make_tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+                assert!(!t.is_null());
+                mlxrs_free_tensor(t);
+            }
+        }
+    }
 }
