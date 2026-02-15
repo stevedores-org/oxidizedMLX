@@ -107,8 +107,8 @@ fn binary_elementwise(
         let mut idx_a = 0;
         let mut idx_b = 0;
         let mut remaining = i;
-        for j in 0..out_ndim {
-            let stride = out_strides[j] as usize;
+        for (j, &stride) in out_strides.iter().enumerate() {
+            let stride = stride as usize;
             let coord = remaining / stride;
             remaining %= stride;
 

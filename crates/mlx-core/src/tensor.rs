@@ -116,10 +116,12 @@ impl Tensor {
 
     /// Element-wise addition.
     pub fn add(&self, rhs: &Tensor) -> Result<Tensor> {
-        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
-            .ok_or_else(|| MlxError::ShapeMismatch {
-                expected: self.shape.0.clone(),
-                got: rhs.shape.0.clone(),
+        let broadcast_shape =
+            Shape::broadcast_shapes(&self.shape, &rhs.shape).ok_or_else(|| {
+                MlxError::ShapeMismatch {
+                    expected: self.shape.0.clone(),
+                    got: rhs.shape.0.clone(),
+                }
             })?;
         Ok(self.lazy_op(
             OpKind::Add,
@@ -131,10 +133,12 @@ impl Tensor {
 
     /// Element-wise subtraction.
     pub fn sub(&self, rhs: &Tensor) -> Result<Tensor> {
-        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
-            .ok_or_else(|| MlxError::ShapeMismatch {
-                expected: self.shape.0.clone(),
-                got: rhs.shape.0.clone(),
+        let broadcast_shape =
+            Shape::broadcast_shapes(&self.shape, &rhs.shape).ok_or_else(|| {
+                MlxError::ShapeMismatch {
+                    expected: self.shape.0.clone(),
+                    got: rhs.shape.0.clone(),
+                }
             })?;
         Ok(self.lazy_op(
             OpKind::Sub,
@@ -146,10 +150,12 @@ impl Tensor {
 
     /// Element-wise multiplication.
     pub fn mul(&self, rhs: &Tensor) -> Result<Tensor> {
-        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
-            .ok_or_else(|| MlxError::ShapeMismatch {
-                expected: self.shape.0.clone(),
-                got: rhs.shape.0.clone(),
+        let broadcast_shape =
+            Shape::broadcast_shapes(&self.shape, &rhs.shape).ok_or_else(|| {
+                MlxError::ShapeMismatch {
+                    expected: self.shape.0.clone(),
+                    got: rhs.shape.0.clone(),
+                }
             })?;
         Ok(self.lazy_op(
             OpKind::Mul,
@@ -161,10 +167,12 @@ impl Tensor {
 
     /// Element-wise division.
     pub fn div(&self, rhs: &Tensor) -> Result<Tensor> {
-        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
-            .ok_or_else(|| MlxError::ShapeMismatch {
-                expected: self.shape.0.clone(),
-                got: rhs.shape.0.clone(),
+        let broadcast_shape =
+            Shape::broadcast_shapes(&self.shape, &rhs.shape).ok_or_else(|| {
+                MlxError::ShapeMismatch {
+                    expected: self.shape.0.clone(),
+                    got: rhs.shape.0.clone(),
+                }
             })?;
         Ok(self.lazy_op(
             OpKind::Div,
