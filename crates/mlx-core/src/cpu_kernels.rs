@@ -66,6 +66,13 @@ impl Backend for CpuRefBackend {
             } => cpu_rope(inputs, output_meta, *rotary_dim, *pos_offset, *theta),
             OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
             OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
+            OpKind::SoftmaxVjp { axis } => softmax_vjp(inputs, *axis),
+            OpKind::SiluVjp => silu_vjp(inputs),
+            OpKind::GeluVjp => gelu_vjp(inputs),
+            OpKind::Sqrt => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|&x| x.sqrt()).collect())
+            }
             OpKind::RoPE {
                 base,
                 offset,
@@ -460,6 +467,102 @@ fn rms_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
         }
     }
     Ok(result)
+}
+
+/// Softmax backward: inputs = [grad_output, softmax_output].
+///
+/// dx_i = s_i * (dy_i - sum(dy * s))
+fn softmax_vjp(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let s = require_input(inputs, 1)?;
+    if dy.data.len() != s.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: s.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    let ndim = s.shape.ndim() as i32;
+    let ax = if axis < 0 { ndim + axis } else { axis };
+    if ax < 0 || ax >= ndim {
+        return Err(MlxError::InvalidArgument(format!(
+            "axis {axis} out of range for ndim {ndim}"
+        )));
+    }
+    let ax = ax as usize;
+
+    let outer: usize = s.shape.0[..ax].iter().product::<i64>() as usize;
+    let dim: usize = s.shape.0[ax] as usize;
+    let inner: usize = s.shape.0[ax + 1..].iter().product::<i64>() as usize;
+
+    let mut result = vec![0.0f32; s.data.len()];
+    for o in 0..outer {
+        for i in 0..inner {
+            // dot = sum(dy * s) along the axis
+            let mut dot = 0.0f32;
+            for d in 0..dim {
+                let idx = o * dim * inner + d * inner + i;
+                dot += dy.data[idx] * s.data[idx];
+            }
+            for d in 0..dim {
+                let idx = o * dim * inner + d * inner + i;
+                result[idx] = s.data[idx] * (dy.data[idx] - dot);
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// SiLU backward: inputs = [grad_output, original_input].
+///
+/// d_silu/dx = σ(x) * (1 + x * (1 - σ(x)))
+fn silu_vjp(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let x = require_input(inputs, 1)?;
+    if dy.data.len() != x.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: x.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    Ok(dy
+        .data
+        .iter()
+        .zip(x.data.iter())
+        .map(|(&dy_i, &x_i)| {
+            let sig = sigmoid(x_i);
+            dy_i * sig * (1.0 + x_i * (1.0 - sig))
+        })
+        .collect())
+}
+
+/// GELU backward (tanh approximation): inputs = [grad_output, original_input].
+///
+/// gelu(x) = 0.5x(1 + tanh(a(x + bx³)))
+/// d_gelu/dx = 0.5(1 + tanh(...)) + 0.5x * sech²(...) * a(1 + 3bx²)
+fn gelu_vjp(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
+    let dy = require_input(inputs, 0)?;
+    let x = require_input(inputs, 1)?;
+    if dy.data.len() != x.data.len() {
+        return Err(MlxError::ShapeMismatch {
+            expected: x.shape.0.clone(),
+            got: dy.shape.0.clone(),
+        });
+    }
+    let a = (2.0f32 / std::f32::consts::PI).sqrt();
+    let b = 0.044715f32;
+    Ok(dy
+        .data
+        .iter()
+        .zip(x.data.iter())
+        .map(|(&dy_i, &x_i)| {
+            let inner = a * (x_i + b * x_i * x_i * x_i);
+            let tanh_inner = inner.tanh();
+            let sech2 = 1.0 - tanh_inner * tanh_inner;
+            let dgelu =
+                0.5 * (1.0 + tanh_inner) + 0.5 * x_i * sech2 * a * (1.0 + 3.0 * b * x_i * x_i);
+            dy_i * dgelu
+        })
+        .collect())
 }
 
 fn cpu_rope(

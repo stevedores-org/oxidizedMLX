@@ -57,18 +57,11 @@ fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
     let mut grads: HashMap<NodeId, Tensor> = HashMap::new();
     grads.insert(loss.node_id(), seed);
 
-    let mut target_grad = None;
-
     for &node_id in order.iter().rev() {
         let grad_output = match grads.remove(&node_id) {
             Some(g) => g,
             None => continue,
         };
-
-        // Capture gradient w.r.t the target input if we found it
-        if node_id == wrt.node_id() {
-            target_grad = Some(grad_output.clone());
-        }
 
         let node = match stream.get_node(node_id) {
             Some(n) => n,
@@ -108,7 +101,7 @@ fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
         }
     }
 
-    target_grad.ok_or_else(|| {
+    grads.remove(&wrt.node_id()).ok_or_else(|| {
         MlxError::InvalidArgument("gradient not found — input may not affect the loss".into())
     })
 }
@@ -492,6 +485,116 @@ mod tests {
         let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
         let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
 
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-2, 1e-2);
+    }
+
+    // ── Activation gradient checks ─────────────────────────────────────
+
+    #[test]
+    fn test_grad_softmax_1d() {
+        let x_data = [1.0, 2.0, 3.0, 4.0];
+        let f = |x: &Tensor| x.softmax(0)?.sum_all();
+        let x = t(&x_data, &[4]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[4], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_softmax_2d() {
+        let x_data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let f = |x: &Tensor| x.softmax(1)?.sum_all();
+        let x = t(&x_data, &[2, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[2, 3], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_softmax_3d() {
+        let x_data = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+        let f = |x: &Tensor| x.softmax(2)?.sum_all();
+        let x = t(&x_data, &[2, 2, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[2, 2, 3], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_softmax_weighted() {
+        // f(x) = sum(softmax(x) * [1, 2, 3]) — non-trivial gradient
+        let x_data = [1.0, 2.0, 3.0];
+        let w = t(&[1.0, 2.0, 3.0], &[3]);
+        let f = |x: &Tensor| x.softmax(0)?.mul(&w)?.sum_all();
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_silu_1d() {
+        let x_data = [-2.0, -1.0, 0.0, 1.0, 2.0];
+        let f = |x: &Tensor| x.silu().sum_all();
+        let x = t(&x_data, &[5]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[5], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_silu_2d() {
+        let x_data = [0.5, -0.5, 1.5, -1.5, 2.5, -2.5];
+        let f = |x: &Tensor| x.silu().sum_all();
+        let x = t(&x_data, &[2, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[2, 3], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_gelu_1d() {
+        let x_data = [-2.0, -1.0, 0.0, 1.0, 2.0];
+        let f = |x: &Tensor| x.gelu().sum_all();
+        let x = t(&x_data, &[5]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[5], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_gelu_2d() {
+        let x_data = [0.5, -0.5, 1.5, -1.5, 2.5, -2.5];
+        let f = |x: &Tensor| x.gelu().sum_all();
+        let x = t(&x_data, &[2, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[2, 3], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_silu_chain() {
+        // f(x) = sum(silu(x * 2))
+        let x_data = [1.0, 2.0, 3.0];
+        let two = t(&[2.0, 2.0, 2.0], &[3]);
+        let f = |x: &Tensor| x.mul(&two)?.silu().sum_all();
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-2, 1e-2);
+    }
+
+    #[test]
+    fn test_grad_gelu_chain() {
+        // f(x) = sum(gelu(x + 1))
+        let x_data = [1.0, 2.0, 3.0];
+        let one = t(&[1.0, 1.0, 1.0], &[3]);
+        let f = |x: &Tensor| x.add(&one)?.gelu().sum_all();
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
         mlx_conformance::assert_allclose(&analytical, &numerical, 1e-2, 1e-2);
     }
 

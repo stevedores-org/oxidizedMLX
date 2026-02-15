@@ -106,6 +106,18 @@ pub enum OpKind {
     RmsNormVjp {
         eps: f32,
     },
+    /// Softmax backward: inputs = [grad_output, softmax_output], produces grad_input.
+    SoftmaxVjp {
+        axis: i32,
+    },
+    /// SiLU backward: inputs = [grad_output, original_input], produces grad_input.
+    SiluVjp,
+    /// GELU backward: inputs = [grad_output, original_input], produces grad_input.
+    GeluVjp,
+
+    // ── Elementwise (misc) ──────────────────────────────────────────
+    /// Element-wise square root.
+    Sqrt,
 
     // ── Rotary Positional Embeddings ───────────────────────────────────
     #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
@@ -291,6 +303,12 @@ enum OpKey {
     Broadcast { target_shape: Vec<i64> },
     LayerNormVjp { eps_bits: u32 },
     RmsNormVjp { eps_bits: u32 },
+    Rope { rotary_dim: usize, pos_offset: usize, theta_bits: u32 },
+    RoPE { base_bits: u32, offset: usize, traditional: bool },
+    SoftmaxVjp { axis: i32 },
+    SiluVjp,
+    GeluVjp,
+    Sqrt,
 }
 
 impl OpKey {
@@ -329,6 +347,20 @@ impl OpKey {
             OpKind::RmsNormVjp { eps } => OpKey::RmsNormVjp {
                 eps_bits: eps.to_bits(),
             },
+            OpKind::Rope { rotary_dim, pos_offset, theta } => OpKey::Rope {
+                rotary_dim: *rotary_dim,
+                pos_offset: *pos_offset,
+                theta_bits: theta.to_bits(),
+            },
+            OpKind::RoPE { base, offset, traditional } => OpKey::RoPE {
+                base_bits: base.to_bits(),
+                offset: *offset,
+                traditional: *traditional,
+            },
+            OpKind::SoftmaxVjp { axis } => OpKey::SoftmaxVjp { axis: *axis },
+            OpKind::SiluVjp => OpKey::SiluVjp,
+            OpKind::GeluVjp => OpKey::GeluVjp,
+            OpKind::Sqrt => OpKey::Sqrt,
         }
     }
 }

@@ -38,9 +38,11 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         OpKind::Neg
         | OpKind::Silu
         | OpKind::Gelu
+        | OpKind::Sqrt
         | OpKind::Constant
         | OpKind::Parameter
-        | OpKind::Rope { .. } => {
+        | OpKind::Rope { .. }
+        | OpKind::RoPE { .. } => {
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
@@ -132,7 +134,11 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Backward ops: output shape = input shape (must match grad_output shape).
-        OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
+        OpKind::LayerNormVjp { .. }
+        | OpKind::RmsNormVjp { .. }
+        | OpKind::SoftmaxVjp { .. }
+        | OpKind::SiluVjp
+        | OpKind::GeluVjp => {
             let grad_output = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing grad_output (input 0)".into()))?;
