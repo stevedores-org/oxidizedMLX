@@ -7,7 +7,7 @@
 
 ## Current State
 
-| Crate | Existing Unit Tests | Existing Integration Tests | Estimated Coverage |
+| Area (Crate/Module) | Existing Unit Tests | Existing Integration Tests | Estimated Coverage |
 |---|---|---|---|
 | `mlx-core::types` | 3 | — | ~38% |
 | `mlx-core::graph` | 1 | — | ~20% |
@@ -312,7 +312,7 @@
 
 - [ ] Test `assert_allclose` with empty slices (should pass)
 - [ ] Test `assert_allclose` with NaN values (should fail — NaN != NaN)
-- [ ] Test `assert_allclose` with Inf values (matching Infs should pass)
+- [ ] Test `assert_allclose` with Inf values (matching Infs should pass) — requires special-case handling in `assert_allclose` because `inf - inf` is NaN
 - [ ] Test `assert_allclose` with length mismatch panics with correct message
 
 ### Story 8.2: Expand golden conformance tests
