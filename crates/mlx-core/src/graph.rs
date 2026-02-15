@@ -105,6 +105,7 @@ pub struct Graph {
     nodes: Vec<Node>,
     next_id: u64,
     cse: HashMap<CseKey, NodeId>,
+    const_payloads: HashMap<NodeId, Vec<f32>>,
 }
 
 impl Graph {
@@ -146,12 +147,16 @@ impl Graph {
         op: OpKind,
         inputs: SmallVec<[NodeId; 2]>,
         meta: TensorMeta,
-        const_hash: Option<u64>,
+        const_payload: Option<&[f32]>,
     ) -> NodeId {
         if !is_cse_eligible(&op) {
             return self.add_node_raw(op, inputs, meta);
         }
 
+        let mut inputs = inputs;
+        normalize_inputs_for_cse(&op, &mut inputs);
+
+        let const_hash = const_payload.map(hash_f32_payload);
         let key = CseKey {
             op_key: OpKey::from_op(&op),
             inputs: inputs.clone(),
@@ -160,12 +165,31 @@ impl Graph {
         };
 
         if let Some(&existing) = self.cse.get(&key) {
-            return existing;
+            if matches!(op, OpKind::Constant) {
+                if let (Some(payload), Some(existing_payload)) =
+                    (const_payload, self.const_payload(existing))
+                {
+                    if existing_payload == payload {
+                        return existing;
+                    }
+                }
+            } else {
+                return existing;
+            }
         }
 
         let id = self.add_node_raw(op, inputs, meta);
+        if matches!(key.op_key, OpKey::Constant) {
+            if let Some(payload) = const_payload {
+                self.const_payloads.insert(id, payload.to_vec());
+            }
+        }
         self.cse.insert(key, id);
         id
+    }
+
+    pub fn const_payload(&self, id: NodeId) -> Option<&[f32]> {
+        self.const_payloads.get(&id).map(|v| v.as_slice())
     }
 
     /// Get a node by ID.
@@ -306,6 +330,14 @@ pub fn hash_f32_payload(data: &[f32]) -> u64 {
     h.finish()
 }
 
+fn normalize_inputs_for_cse(op: &OpKind, inputs: &mut SmallVec<[NodeId; 2]>) {
+    if matches!(op, OpKind::Add | OpKind::Mul) && inputs.len() == 2 {
+        if inputs[0].0 > inputs[1].0 {
+            inputs.swap(0, 1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,9 +387,18 @@ mod tests {
             shape: Shape::new(vec![2]),
             dtype: DType::F32,
         };
-        let hash = hash_f32_payload(&[1.0, 2.0]);
-        let a = g.intern_node(OpKind::Constant, SmallVec::new(), meta.clone(), Some(hash));
-        let b = g.intern_node(OpKind::Constant, SmallVec::new(), meta.clone(), Some(hash));
+        let a = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
+        let b = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
         assert_eq!(a, b);
         assert_eq!(g.len(), 1);
 

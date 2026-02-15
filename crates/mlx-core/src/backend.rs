@@ -59,12 +59,11 @@ impl Stream {
     /// Add a constant node (data already known).
     pub fn add_constant(&self, data: Vec<f32>, meta: TensorMeta) -> NodeId {
         let mut graph = self.graph.lock().unwrap();
-        let const_hash = crate::graph::hash_f32_payload(&data);
         let id = graph.intern_node(
             OpKind::Constant,
             smallvec::SmallVec::new(),
             meta,
-            Some(const_hash),
+            Some(&data),
         );
         let mut buffers = self.buffers.lock().unwrap();
         if !buffers.contains_key(&id) {
