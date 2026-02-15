@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/mlx-sys",
+  "crates/mlx-core",
+  "crates/mlx-ops",
+  "crates/mlx-cpu",
+  "crates/mlx-metal",
+  "crates/mlx-autograd",
+  "crates/mlx-nn",
+  "crates/mlx-optim",
+  "crates/mlx-io",
+  "crates/mlx-conformance",
+  "crates/mlx-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["stevedores-org"]
+repository = "https://github.com/stevedores-org/oxidizedMLX"
+
+[workspace.dependencies]
+thiserror = "2"
+smallvec = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+rand = "0.9"
+rand_chacha = "0.9"
+tempfile = "3"
+proptest = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"

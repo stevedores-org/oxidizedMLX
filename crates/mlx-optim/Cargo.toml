@@ -1,0 +1,9 @@
+[package]
+name = "mlx-optim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Optimizers (AdamW, SGD) and learning rate schedulers"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }

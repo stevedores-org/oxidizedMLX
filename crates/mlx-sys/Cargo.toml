@@ -1,0 +1,20 @@
+[package]
+name = "mlx-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Unsafe FFI bindings to MLX C API"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+libc.workspace = true
+
+[build-dependencies]
+cmake = "0.1"
+bindgen = { version = "0.71", optional = true }
+
+[features]
+default = []
+bindgen = ["dep:bindgen"]

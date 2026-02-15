@@ -1,0 +1,13 @@
+[package]
+name = "mlx-ops"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Op registry, broadcasting rules, and dtype promotion for MLX"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

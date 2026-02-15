@@ -1,0 +1,10 @@
+[package]
+name = "mlx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI tool for smoke tests, benchmarks, and conformance runs"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+clap.workspace = true

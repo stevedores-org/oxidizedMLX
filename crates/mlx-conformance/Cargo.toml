@@ -1,0 +1,14 @@
+[package]
+name = "mlx-conformance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Golden conformance tests: Rust outputs vs Python MLX oracle"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true

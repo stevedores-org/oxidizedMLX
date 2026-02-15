@@ -1,0 +1,9 @@
+[package]
+name = "mlx-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tensor serialization: safetensors, GGUF, mmap loading"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }

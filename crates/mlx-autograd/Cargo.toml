@@ -1,0 +1,9 @@
+[package]
+name = "mlx-autograd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Automatic differentiation (reverse-mode AD) for MLX tensors"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }

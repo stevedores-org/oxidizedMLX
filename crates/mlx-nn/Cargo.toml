@@ -1,0 +1,9 @@
+[package]
+name = "mlx-nn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Neural network modules: Linear, LayerNorm, Attention, etc."
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }

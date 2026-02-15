@@ -1,0 +1,39 @@
+# oxidizedMLX development commands
+
+default:
+    @just --list
+
+# Format all Rust code
+fmt:
+    cargo fmt --all
+
+# Run clippy lints
+clippy:
+    cargo clippy --all-targets --all-features -- -D warnings
+
+# Run all tests (CPU-only, no FFI)
+test:
+    cargo test --workspace --exclude mlx-sys --exclude mlx-conformance
+
+# Run tests including FFI (requires MLX_SRC)
+test-ffi:
+    cargo test --workspace
+
+# Run conformance tests against Python MLX
+conformance:
+    cargo test -p mlx-conformance
+
+# Run the CLI smoke test
+smoke:
+    cargo run -p mlx-cli -- smoke
+
+# Full CI check (fmt + clippy + test)
+ci: fmt clippy test
+
+# Run property tests with more cases
+proptest:
+    PROPTEST_CASES=10000 cargo test -p mlx-ops -- proptest
+
+# Run benchmarks
+bench:
+    cargo bench -p mlx-cli
