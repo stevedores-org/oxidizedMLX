@@ -266,13 +266,27 @@ mod tests {
 
         s.eval(c).unwrap();
         let count_after_first = s.eval_count();
-        assert!(count_after_first > 0);
+        let cache_after_first = s.cache_len();
+        assert!(count_after_first > 0, "should have called backend");
+        assert!(cache_after_first > 0, "should have cached buffers");
+        
+        // Verify the computation result is correct
+        assert_eq!(
+            s.get_buffer(c).unwrap(),
+            vec![4.0, 6.0],
+            "Add result should be [1+3, 2+4]"
+        );
 
         s.eval(c).unwrap();
         assert_eq!(
             s.eval_count(),
             count_after_first,
             "repeated eval should not recompute"
+        );
+        assert_eq!(
+            s.cache_len(),
+            cache_after_first,
+            "repeated eval should not change cache size"
         );
     }
 
@@ -294,6 +308,7 @@ mod tests {
 
         s.eval(d).unwrap();
         let count_after_d = s.eval_count();
+        let cache_after_d = s.cache_len();
 
         // Re-eval d — fully cached.
         s.eval(d).unwrap();
@@ -302,6 +317,11 @@ mod tests {
             count_after_d,
             "repeated eval of d should not recompute"
         );
+        assert_eq!(
+            s.cache_len(),
+            cache_after_d,
+            "repeated eval should not change cache size"
+        );
 
         // Eval c separately — already cached from d's eval.
         s.eval(c).unwrap();
@@ -309,6 +329,11 @@ mod tests {
             s.eval_count(),
             count_after_d,
             "c should already be cached from d's eval"
+        );
+        assert_eq!(
+            s.cache_len(),
+            cache_after_d,
+            "cache should remain stable"
         );
     }
 
@@ -340,12 +365,52 @@ mod tests {
             3,
             "diamond should require exactly 3 backend calls"
         );
+        let cache_after_first = s.cache_len();
+        assert!(cache_after_first > 0, "should have cached buffers");
+        
+        // Verify computation results:
+        // b = a+a = [1+1, 2+2] = [2, 4]
+        // c = a*a = [1*1, 2*2] = [1, 4]
+        // d = b+c = [2+1, 4+4] = [3, 8]
+        assert_eq!(
+            s.get_buffer(b).unwrap(),
+            vec![2.0, 4.0],
+            "b = a+a should be [2, 4]"
+        );
+        assert_eq!(
+            s.get_buffer(c).unwrap(),
+            vec![1.0, 4.0],
+            "c = a*a should be [1, 4]"
+        );
+        assert_eq!(
+            s.get_buffer(d).unwrap(),
+            vec![3.0, 8.0],
+            "d = b+c should be [3, 8]"
+        );
 
         s.eval(d).unwrap();
         assert_eq!(
             s.eval_count(),
             3,
             "repeated eval should not increase call count"
+        );
+        assert_eq!(
+            s.cache_len(),
+            cache_after_first,
+            "repeated eval should not change cache size"
+        );
+        
+        // Now eval just b to ensure it's still cached
+        s.eval(b).unwrap();
+        assert_eq!(
+            s.eval_count(),
+            3,
+            "eval of cached node should not increase call count"
+        );
+        assert_eq!(
+            s.cache_len(),
+            cache_after_first,
+            "cache should remain stable"
         );
     }
 }

@@ -209,4 +209,42 @@ mod tests {
         // Each element in [2,3] should get grad 1.0 (broadcast from [3])
         assert_eq!(result, vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
     }
+
+    #[test]
+    fn test_vjp_broadcast_scalar() {
+        // Broadcast [1] -> [3]: gradient should sum to 3
+        let input = t(&[2.0], &[1]);
+        let grad_out = t(&[1.0, 1.0, 1.0], &[3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: Shape::new(vec![3]),
+            },
+            &[input],
+            &t(&[2.0, 2.0, 2.0], &[3]),
+            &grad_out,
+        )
+        .unwrap();
+        // Gradient should sum over broadcasted dimension
+        assert_eq!(grads[0].to_vec_f32().unwrap(), vec![3.0]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_2d() {
+        // Broadcast [2,1] -> [2,3]: each row collects sum of its broadcasted axis
+        let input = t(&[2.0, 5.0], &[2, 1]);
+        let grad_out = t(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0], &[2, 3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: Shape::new(vec![2, 3]),
+            },
+            &[input],
+            &t(&[2.0, 2.0, 2.0, 5.0, 5.0, 5.0], &[2, 3]),
+            &grad_out,
+        )
+        .unwrap();
+        // Each row sums its 3 gradient values: [1+1+1, 1+1+1] = [3, 3]
+        // But result shape should be [2,1]
+        let result = grads[0].to_vec_f32().unwrap();
+        assert_eq!(result, vec![3.0, 3.0]);
+    }
 }
