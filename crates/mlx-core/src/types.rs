@@ -68,6 +68,41 @@ impl Shape {
             None
         }
     }
+
+    /// Compute the broadcast shape of two shapes, or None if incompatible.
+    pub fn broadcast_shapes(a: &Shape, b: &Shape) -> Option<Shape> {
+        let a_dims = &a.0;
+        let b_dims = &b.0;
+        let max_ndim = a_dims.len().max(b_dims.len());
+
+        let mut result = Vec::with_capacity(max_ndim);
+
+        for i in 0..max_ndim {
+            let da = if i < a_dims.len() {
+                a_dims[a_dims.len() - 1 - i]
+            } else {
+                1
+            };
+            let db = if i < b_dims.len() {
+                b_dims[b_dims.len() - 1 - i]
+            } else {
+                1
+            };
+
+            if da == db {
+                result.push(da);
+            } else if da == 1 {
+                result.push(db);
+            } else if db == 1 {
+                result.push(da);
+            } else {
+                return None;
+            }
+        }
+
+        result.reverse();
+        Some(Shape::new(result))
+    }
 }
 
 impl std::fmt::Display for Shape {

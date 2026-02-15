@@ -21,10 +21,10 @@ impl Backend for CpuRefBackend {
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(
                 "Constant/Parameter nodes should be pre-materialized".into(),
             )),
-            OpKind::Add => binary_elementwise(inputs, |a, b| a + b),
-            OpKind::Mul => binary_elementwise(inputs, |a, b| a * b),
-            OpKind::Sub => binary_elementwise(inputs, |a, b| a - b),
-            OpKind::Div => binary_elementwise(inputs, |a, b| a / b),
+            OpKind::Add => binary_elementwise(inputs, output_meta, |a, b| a + b),
+            OpKind::Mul => binary_elementwise(inputs, output_meta, |a, b| a * b),
+            OpKind::Sub => binary_elementwise(inputs, output_meta, |a, b| a - b),
+            OpKind::Div => binary_elementwise(inputs, output_meta, |a, b| a / b),
             OpKind::Neg => {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.iter().map(|x| -x).collect())
@@ -72,20 +72,71 @@ fn require_input<'a>(inputs: &'a [NodeInput<'_>], idx: usize) -> Result<&'a Node
         .ok_or_else(|| MlxError::InvalidArgument(format!("expected input at index {idx}")))
 }
 
-fn binary_elementwise(inputs: &[NodeInput<'_>], f: fn(f32, f32) -> f32) -> Result<Vec<f32>> {
+fn binary_elementwise(
+    inputs: &[NodeInput<'_>],
+    output_meta: &TensorMeta,
+    f: fn(f32, f32) -> f32,
+) -> Result<Vec<f32>> {
     let a = require_input(inputs, 0)?;
     let b = require_input(inputs, 1)?;
-    if a.data.len() != b.data.len() {
-        return Err(MlxError::ShapeMismatch {
-            expected: a.shape.0.clone(),
-            got: b.shape.0.clone(),
-        });
+
+    let out_shape = &output_meta.shape;
+    let out_numel = out_shape.numel() as usize;
+
+    // Quick path: same shapes
+    if a.shape == b.shape && a.shape == out_shape {
+        return Ok(a
+            .data
+            .iter()
+            .zip(b.data.iter())
+            .map(|(&x, &y)| f(x, y))
+            .collect());
     }
-    Ok(a.data
-        .iter()
-        .zip(b.data.iter())
-        .map(|(&x, &y)| f(x, y))
-        .collect())
+
+    // Slow path: broadcasting
+    let a_strides = compute_strides(a.shape);
+    let b_strides = compute_strides(b.shape);
+    let out_strides = compute_strides(out_shape);
+
+    let mut result = Vec::with_capacity(out_numel);
+    let out_ndim = out_shape.ndim();
+    let a_ndim = a.shape.ndim();
+    let b_ndim = b.shape.ndim();
+
+    for i in 0..out_numel {
+        let mut idx_a = 0;
+        let mut idx_b = 0;
+        let mut remaining = i;
+        for j in 0..out_ndim {
+            let stride = out_strides[j] as usize;
+            let coord = remaining / stride;
+            remaining %= stride;
+
+            if j >= out_ndim - a_ndim {
+                let aj = j - (out_ndim - a_ndim);
+                if a.shape.0[aj] != 1 {
+                    idx_a += coord * a_strides[aj] as usize;
+                }
+            }
+            if j >= out_ndim - b_ndim {
+                let bj = j - (out_ndim - b_ndim);
+                if b.shape.0[bj] != 1 {
+                    idx_b += coord * b_strides[bj] as usize;
+                }
+            }
+        }
+        result.push(f(a.data[idx_a], b.data[idx_b]));
+    }
+    Ok(result)
+}
+
+fn compute_strides(shape: &crate::types::Shape) -> Vec<i64> {
+    let ndim = shape.ndim();
+    let mut strides = vec![1; ndim];
+    for i in (0..ndim.saturating_sub(1)).rev() {
+        strides[i] = strides[i + 1] * shape.0[i + 1];
+    }
+    strides
 }
 
 fn reduce_sum(inputs: &[NodeInput<'_>], axis: Option<i32>) -> Result<Vec<f32>> {
@@ -105,8 +156,13 @@ fn reduce_mean(inputs: &[NodeInput<'_>], axis: Option<i32>) -> Result<Vec<f32>> 
         }
         Some(axis) => {
             let ndim = a.shape.ndim() as i32;
-            let ax = if axis < 0 { ndim + axis } else { axis } as usize;
-            let dim = a.shape.0[ax] as f32;
+            let ax = if axis < 0 { ndim + axis } else { axis };
+            if ax < 0 || ax >= ndim {
+                return Err(MlxError::InvalidArgument(format!(
+                    "axis {axis} out of range for ndim {ndim}"
+                )));
+            }
+            let dim = a.shape.0[ax as usize] as f32;
             reduce_along_axis(a, axis, |slice| slice.iter().sum::<f32>() / dim)
         }
     }
@@ -283,6 +339,9 @@ fn layer_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<
         return Ok(a.data.to_vec());
     }
     let last_dim = a.shape.0[ndim - 1] as usize;
+    if last_dim == 0 {
+        return Ok(vec![]);
+    }
     let outer = a.data.len() / last_dim;
 
     let mut result = vec![0.0f32; a.data.len()];
@@ -309,6 +368,9 @@ fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Ve
         return Ok(a.data.to_vec());
     }
     let last_dim = a.shape.0[ndim - 1] as usize;
+    if last_dim == 0 {
+        return Ok(vec![]);
+    }
     let outer = a.data.len() / last_dim;
 
     let mut result = vec![0.0f32; a.data.len()];
@@ -460,5 +522,30 @@ mod tests {
         assert!((result[0]).abs() < 1e-6);
         assert!((result[1] - 0.7311).abs() < 1e-3);
         assert!((result[2] - (-0.2689)).abs() < 1e-3);
+    }
+    #[test]
+    fn test_layer_norm_zero_dim() {
+        let backend = CpuRefBackend;
+        let data = [];
+        let result = backend
+            .eval_node(
+                &OpKind::LayerNorm { eps: 1e-5 },
+                &[input(&data, vec![2, 0])],
+                &meta(vec![2, 0]),
+            )
+            .unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_reduce_mean_invalid_axis() {
+        let backend = CpuRefBackend;
+        let data = [1.0, 2.0, 3.0];
+        let result = backend.eval_node(
+            &OpKind::Mean { axis: Some(10) },
+            &[input(&data, vec![3])],
+            &meta(vec![3]),
+        );
+        assert!(result.is_err());
     }
 }

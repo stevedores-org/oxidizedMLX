@@ -65,14 +65,11 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             match axis {
-                None => Ok(Shape::new(vec![1])),
+                None => Ok(Shape::scalar()),
                 Some(ax) => {
                     let resolved = resolve_axis(*ax, a.ndim())?;
                     let mut dims = a.0.clone();
                     dims.remove(resolved);
-                    if dims.is_empty() {
-                        dims.push(1);
-                    }
                     Ok(Shape::new(dims))
                 }
             }
@@ -176,7 +173,7 @@ mod tests {
     fn test_sum_all() {
         let a = s(&[2, 3]);
         let result = infer_shape(&OpKind::Sum { axis: None }, &[&a]).unwrap();
-        assert_eq!(result, s(&[1]));
+        assert_eq!(result, Shape::scalar());
     }
 
     #[test]
