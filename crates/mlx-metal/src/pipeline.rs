@@ -40,6 +40,10 @@ impl PipelineCache {
         self.get_or_build(device, "tiled_gemm_f32", include_str!("kernels/gemm.metal"))
     }
 
+    pub(crate) fn get_rope_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "rope_f32", include_str!("kernels/rope_f32.metal"))
+    }
+
     fn get_or_build(
         &self,
         device: &Device,

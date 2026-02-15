@@ -59,6 +59,11 @@ impl Backend for CpuRefBackend {
             OpKind::LayerNorm { eps } => layer_norm(inputs, *eps, output_meta),
             OpKind::RmsNorm { eps } => rms_norm(inputs, *eps, output_meta),
             OpKind::Broadcast { target_shape } => broadcast(inputs, target_shape),
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
+            } => cpu_rope(inputs, output_meta, *rotary_dim, *pos_offset, *theta),
             OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
             OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
             OpKind::RoPE {
@@ -455,6 +460,45 @@ fn rms_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
         }
     }
     Ok(result)
+}
+
+fn cpu_rope(
+    inputs: &[NodeInput<'_>],
+    meta: &TensorMeta,
+    rotary_dim: usize,
+    pos_offset: usize,
+    theta: f32,
+) -> Result<Vec<f32>> {
+    let x = require_input(inputs, 0)?;
+    if meta.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Rope input must be 2-D [tokens, head_dim]".into(),
+        ));
+    }
+    let tokens = meta.shape.0[0] as usize;
+    let head_dim = meta.shape.0[1] as usize;
+    if rotary_dim > head_dim || !rotary_dim.is_multiple_of(2) {
+        return Err(MlxError::InvalidArgument(
+            "rotary_dim must be even and <= head_dim".into(),
+        ));
+    }
+
+    let mut out = x.data.to_vec();
+    for t in 0..tokens {
+        for i in 0..rotary_dim / 2 {
+            let inv_freq = theta.powf(-2.0 * i as f32 / rotary_dim as f32);
+            let angle = (pos_offset + t) as f32 * inv_freq;
+            let (s, c) = angle.sin_cos();
+
+            let base = t * head_dim + i * 2;
+            let x0 = x.data[base];
+            let x1 = x.data[base + 1];
+
+            out[base] = x0 * c - x1 * s;
+            out[base + 1] = x0 * s + x1 * c;
+        }
+    }
+    Ok(out)
 }
 
 fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Vec<f32>> {
