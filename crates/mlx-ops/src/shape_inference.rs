@@ -106,7 +106,7 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             if a.numel() != new_shape.numel() {
                 return Err(ShapeError::Mismatch(format!(
-                    "reshape numel mismatch: {} vs {}",
+                    "reshape cannot change numel from {} to {}",
                     a.numel(),
                     new_shape.numel()
                 )));
@@ -115,7 +115,21 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Broadcast: output shape is the target shape.
-        OpKind::Broadcast { target_shape } => Ok(target_shape.clone()),
+        OpKind::Broadcast { target_shape } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            // Validate broadcast compatibility.
+            let result = crate::broadcast_shapes(a, target_shape).ok_or_else(|| {
+                ShapeError::Mismatch(format!("cannot broadcast {a} to {target_shape}"))
+            })?;
+            if &result != target_shape {
+                return Err(ShapeError::Mismatch(format!(
+                    "broadcast result {result} does not match target {target_shape}"
+                )));
+            }
+            Ok(target_shape.clone())
+        }
 
         // Backward ops: output shape = input shape (must match grad_output shape).
         OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
@@ -138,35 +152,42 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let ndim = a.ndim();
             let perm: Vec<usize> = match axes {
                 Some(ax) => {
-                    if ax.len() != a.ndim() {
+                    if ax.len() != ndim {
                         return Err(ShapeError::Mismatch(format!(
-                            "transpose axes length mismatch: {} vs {}",
+                            "transpose axes length {} does not match ndim {}",
                             ax.len(),
-                            a.ndim()
+                            ndim
                         )));
-                    }
-                    // Validate permutation
-                    let mut seen = vec![false; a.ndim()];
-                    for &x in ax {
-                        if x >= a.ndim() {
-                            return Err(ShapeError::InvalidAxis {
-                                axis: x as i32,
-                                ndim: a.ndim(),
-                            });
-                        }
-                        if seen[x] {
-                            return Err(ShapeError::Mismatch(format!(
-                                "duplicate axis {x} in transpose"
-                            )));
-                        }
-                        seen[x] = true;
                     }
                     ax.clone()
                 }
-                None => (0..a.ndim()).rev().collect(),
+                None => (0..ndim).rev().collect(),
             };
+
+            // Validate permutation indices.
+            for &ax in &perm {
+                if ax >= ndim {
+                    return Err(ShapeError::InvalidAxis {
+                        axis: ax as i32,
+                        ndim,
+                    });
+                }
+            }
+
+            // Ensure all axes are unique.
+            let mut seen = std::collections::HashSet::new();
+            for &ax in &perm {
+                if !seen.insert(ax) {
+                    return Err(ShapeError::Mismatch(format!(
+                        "duplicate axis {} in transpose",
+                        ax
+                    )));
+                }
+            }
+
             let new_dims: Vec<i64> = perm.iter().map(|&ax| a.0[ax]).collect();
             Ok(Shape::new(new_dims))
         }

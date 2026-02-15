@@ -24,7 +24,8 @@ impl Device {
     pub fn default_device() -> Self {
         #[cfg(target_os = "macos")]
         {
-            Device::Gpu
+            // TODO: Enable Metal backend when available.
+            Device::Cpu
         }
         #[cfg(not(target_os = "macos"))]
         {
