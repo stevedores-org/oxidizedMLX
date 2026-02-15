@@ -18,6 +18,11 @@ pub struct MetalBackend {
     ctx: Arc<MetalContext>,
 }
 
+// SAFETY: MetalBackend holds an Arc<MetalContext> containing metal::Device and
+// metal::CommandQueue. Both are Objective-C ref-counted wrappers whose retain/
+// release operations are atomic. Metal command queues are documented as thread-
+// safe, and device operations used here (buffer allocation, pipeline creation)
+// are safe to call from any thread.
 unsafe impl Send for MetalBackend {}
 unsafe impl Sync for MetalBackend {}
 
@@ -28,7 +33,7 @@ impl MetalBackend {
         })
     }
 
-    fn data_to_buffer(&self, data: &[f32]) -> metal::Buffer {
+    fn data_to_buffer(&self, data: &[f32]) -> Result<metal::Buffer> {
         let device = self.ctx.device();
         let mut byte_len = std::mem::size_of_val(data) as u64;
         if byte_len == 0 {
@@ -36,12 +41,17 @@ impl MetalBackend {
         }
         let buffer = device.new_buffer(byte_len, MTLResourceOptions::StorageModeShared);
         if !data.is_empty() {
+            let dst = buffer.contents() as *mut f32;
+            if dst.is_null() {
+                return Err(MlxError::InvalidArgument(
+                    "Metal buffer allocation failed (contents pointer is null)".into(),
+                ));
+            }
             unsafe {
-                let dst = buffer.contents() as *mut f32;
                 std::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
             }
         }
-        buffer
+        Ok(buffer)
     }
 
     fn eval_add(&self, inputs: &[NodeInput<'_>], meta: &TensorMeta) -> Result<Vec<f32>> {
@@ -64,8 +74,8 @@ impl MetalBackend {
             return Ok(Vec::new());
         }
 
-        let a_buf = self.data_to_buffer(inputs[0].data);
-        let b_buf = self.data_to_buffer(inputs[1].data);
+        let a_buf = self.data_to_buffer(inputs[0].data)?;
+        let b_buf = self.data_to_buffer(inputs[1].data)?;
 
         let numel_u64 = numel as u64;
         let out_bytes = numel_u64 * std::mem::size_of::<f32>() as u64;
@@ -151,8 +161,8 @@ impl MetalBackend {
             return Ok(Vec::new());
         }
 
-        let a_buf = self.data_to_buffer(inputs[0].data);
-        let b_buf = self.data_to_buffer(inputs[1].data);
+        let a_buf = self.data_to_buffer(inputs[0].data)?;
+        let b_buf = self.data_to_buffer(inputs[1].data)?;
 
         let out_bytes = (numel * std::mem::size_of::<f32>()) as u64;
         let out_buf = self
