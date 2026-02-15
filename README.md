@@ -52,3 +52,8 @@ just clippy-ffi
 - Delivery plan: `docs/DELIVERY_PLAN.md`
 - Concrete milestone + issue checklist: `docs/REPO_CHECKLIST.md`
 
+To materialize the checklist into GitHub labels/milestones/epic issues (idempotent):
+
+```bash
+just roadmap-bootstrap
+```

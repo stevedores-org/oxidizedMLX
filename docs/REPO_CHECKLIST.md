@@ -115,4 +115,4 @@ Issues:
 
 - Default paths (fmt/clippy/tests) should continue excluding `mlx-sys` unless explicitly running FFI (`MLX_SRC`).
 - “Done” means: tests + docs updated and conformance story (where applicable) is satisfied.
-
+- To create labels/milestones/epic issues in GitHub from this checklist, run `just roadmap-bootstrap` (idempotent).
