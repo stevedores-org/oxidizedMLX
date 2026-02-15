@@ -66,17 +66,19 @@ impl<T: Copy> MetalBuffer<T> {
     }
 
     /// Read the buffer contents into a Vec.
-    pub fn read_to_vec(&self) -> Vec<T> {
+    pub fn read_to_vec(&self) -> Result<Vec<T>> {
         if self.len == 0 {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         unsafe {
             let src = self.raw.contents() as *const T;
             if src.is_null() {
-                return Vec::new();
+                return Err(MlxError::InvalidArgument(
+                    "Metal buffer contents pointer was null".to_string(),
+                ));
             }
             let slice = std::slice::from_raw_parts(src, self.len);
-            slice.to_vec()
+            Ok(slice.to_vec())
         }
     }
 }

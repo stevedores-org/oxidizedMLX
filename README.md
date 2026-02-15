@@ -51,6 +51,10 @@ FFI build/test (requires an MLX source checkout):
 export MLX_SRC=/path/to/your/mlx
 just test-ffi
 just clippy-ffi
+
+## Agent Pre-Commit
+
+All agents must run the repo pre-commit checks before committing changes.
 ```
 
 ## Roadmap

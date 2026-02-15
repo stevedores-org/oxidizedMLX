@@ -55,11 +55,12 @@ pub(crate) fn run_add_u32_impl(ctx: &MetalContext, a: &[u32], b: &[u32]) -> Resu
     command_buffer.wait_until_completed();
 
     if command_buffer.status() != MTLCommandBufferStatus::Completed {
+        let status = command_buffer.status();
         return Err(MlxError::InvalidArgument(format!(
             "command buffer failed with status {:?}",
-            command_buffer.status()
+            status
         )));
     }
 
-    Ok(out_buf.read_to_vec())
+    out_buf.read_to_vec()
 }

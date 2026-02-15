@@ -3,6 +3,12 @@
 default:
     @just --list
 
+# Clean Cargo build artifacts for this repo
+clean-target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf target
+
 # Format all Rust code
 fmt:
     cargo fmt --all

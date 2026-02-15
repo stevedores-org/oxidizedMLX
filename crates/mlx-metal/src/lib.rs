@@ -49,8 +49,8 @@ mod stubs {
             Err(MlxError::BackendUnavailable("metal (macOS only)"))
         }
 
-        pub fn read_to_vec(&self) -> Vec<T> {
-            Vec::new()
+        pub fn read_to_vec(&self) -> Result<Vec<T>> {
+            Ok(Vec::new())
         }
     }
 }
