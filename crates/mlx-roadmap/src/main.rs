@@ -540,12 +540,15 @@ fn gh_with_retries_owned(args: Vec<String>, max_attempts: usize) -> Result<Vec<u
         if output.status.success() {
             return Ok(output.stdout);
         }
+        // gh sometimes prints connection errors to stdout, so consider both.
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if attempt < max_attempts && is_transient_gh_error(&stderr) {
+        let combined = format!("{stdout}{stderr}");
+        if attempt < max_attempts && is_transient_gh_error(&combined) {
             std::thread::sleep(Duration::from_millis(400 * attempt as u64));
             continue;
         }
-        return Err(Error::Gh(stderr));
+        return Err(Error::Gh(combined));
     }
     Err(Error::Gh("exhausted retries".to_string()))
 }
