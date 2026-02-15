@@ -53,9 +53,10 @@ impl RmsNorm {
 
 impl Module for RmsNorm {
     fn forward(&self, input: &Tensor) -> Result<Tensor> {
-        let last_dim = *input.shape().0.last().ok_or_else(|| {
-            MlxError::InvalidArgument("RmsNorm requires at least 1D input".into())
-        })? as usize;
+        let last_dim =
+            *input.shape().0.last().ok_or_else(|| {
+                MlxError::InvalidArgument("RmsNorm requires at least 1D input".into())
+            })? as usize;
         if last_dim != self.dim {
             return Err(MlxError::InvalidArgument(format!(
                 "RmsNorm expected last dim {}, got {}",
