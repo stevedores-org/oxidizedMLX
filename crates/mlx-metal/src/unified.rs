@@ -49,14 +49,13 @@ impl<T: Copy> HostAllocation<T> {
         let ps = page_size();
         let rounded = round_up(byte_len, ps);
 
-        let layout =
-            Layout::from_size_align(rounded, ps).map_err(|e| MetalError::BufferCreationFailed(e.to_string()))?;
+        let layout = Layout::from_size_align(rounded, ps)
+            .map_err(|e| MetalError::BufferCreationFailed(e.to_string()))?;
 
         // SAFETY: layout has non-zero size (len > 0 and T is not ZST in practice).
         let raw = unsafe { alloc(layout) };
-        let ptr = NonNull::new(raw as *mut T).ok_or_else(|| {
-            MetalError::BufferCreationFailed("allocation returned null".into())
-        })?;
+        let ptr = NonNull::new(raw as *mut T)
+            .ok_or_else(|| MetalError::BufferCreationFailed("allocation returned null".into()))?;
 
         Ok(Self { ptr, len, layout })
     }
@@ -147,10 +146,7 @@ impl<T: Copy + Send + Sync> UnifiedBuffer<T> {
     /// Create a no-copy buffer backed by a pre-existing `HostAllocation`.
     ///
     /// Metal maps the same physical pages — no `memcpy` occurs.
-    pub(crate) fn from_host_no_copy(
-        device: &Device,
-        host: HostAllocation<T>,
-    ) -> Result<Self> {
+    pub(crate) fn from_host_no_copy(device: &Device, host: HostAllocation<T>) -> Result<Self> {
         let len = host.len();
         let options = MTLResourceOptions::StorageModeShared;
 
@@ -276,9 +272,8 @@ mod tests {
         let buf: UnifiedBuffer<f32> = ctx.buffer_shared_uninitialized(256).unwrap();
 
         // Write via CPU
-        let slice = unsafe {
-            std::slice::from_raw_parts_mut(buf.mtl_buffer().contents() as *mut f32, 256)
-        };
+        let slice =
+            unsafe { std::slice::from_raw_parts_mut(buf.mtl_buffer().contents() as *mut f32, 256) };
         for (i, v) in slice.iter_mut().enumerate() {
             *v = i as f32 * 2.0;
         }
