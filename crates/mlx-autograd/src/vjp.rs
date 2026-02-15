@@ -269,8 +269,15 @@ mod tests {
         let a = t(&[2.0], &[1]);
         let b = a.broadcast_to(&Shape::new(vec![3])).unwrap();
         let grad_out = t(&[1.0, 2.0, 3.0], &[3]);
-        let grads = vjp(&OpKind::Broadcast { target_shape: b.shape().clone() }, &[a], &b, &grad_out)
-            .unwrap();
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: b.shape().clone(),
+            },
+            &[a],
+            &b,
+            &grad_out,
+        )
+        .unwrap();
         assert_eq!(grads[0].to_vec_f32().unwrap(), vec![6.0]);
     }
 
@@ -279,8 +286,15 @@ mod tests {
         let a = t(&[1.0, 2.0], &[2, 1]);
         let b = a.broadcast_to(&Shape::new(vec![2, 3])).unwrap();
         let grad_out = t(&[1.0, 1.0, 1.0, 2.0, 2.0, 2.0], &[2, 3]);
-        let grads = vjp(&OpKind::Broadcast { target_shape: b.shape().clone() }, &[a], &b, &grad_out)
-            .unwrap();
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: b.shape().clone(),
+            },
+            &[a],
+            &b,
+            &grad_out,
+        )
+        .unwrap();
         assert_eq!(grads[0].to_vec_f32().unwrap(), vec![3.0, 6.0]);
     }
 }

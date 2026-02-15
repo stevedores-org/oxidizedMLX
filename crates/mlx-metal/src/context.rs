@@ -20,8 +20,7 @@ pub struct MetalContext {
 impl MetalContext {
     /// Create a new Metal context using the system default device.
     pub fn new() -> Result<Self> {
-        let device = Device::system_default()
-            .ok_or(MetalError::NoDevice)?;
+        let device = Device::system_default().ok_or(MetalError::NoDevice)?;
         let queue = device.new_command_queue();
         info!(device = %device.name(), "Initialized Metal context");
         Ok(Self {

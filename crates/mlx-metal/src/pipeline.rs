@@ -38,9 +38,9 @@ impl PipelineCache {
         }
 
         let library = compile_library(device, source)?;
-        let function = library
-            .get_function(key, None)
-            .map_err(|e| MetalError::InvalidArgument(format!("failed to get function {key}: {e}")))?;
+        let function = library.get_function(key, None).map_err(|e| {
+            MetalError::InvalidArgument(format!("failed to get function {key}: {e}"))
+        })?;
 
         let pipeline = device
             .new_compute_pipeline_state_with_function(&function)
