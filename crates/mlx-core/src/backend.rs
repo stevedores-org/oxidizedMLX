@@ -59,9 +59,14 @@ impl Stream {
     /// Add a constant node (data already known).
     pub fn add_constant(&self, data: Vec<f32>, meta: TensorMeta) -> NodeId {
         let mut graph = self.graph.lock().unwrap();
-        let id = graph.add_node(OpKind::Constant, smallvec::SmallVec::new(), meta);
+        let id = graph.intern_node(
+            OpKind::Constant,
+            smallvec::SmallVec::new(),
+            meta,
+            Some(&data),
+        );
         let mut buffers = self.buffers.lock().unwrap();
-        buffers.insert(id, data);
+        buffers.entry(id).or_insert(data);
         id
     }
 
@@ -73,7 +78,7 @@ impl Stream {
         meta: TensorMeta,
     ) -> NodeId {
         let mut graph = self.graph.lock().unwrap();
-        graph.add_node(op, inputs, meta)
+        graph.intern_node(op, inputs, meta, None)
     }
 
     /// Evaluate all nodes needed to materialize the given output.

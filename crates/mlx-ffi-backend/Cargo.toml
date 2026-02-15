@@ -1,0 +1,16 @@
+[package]
+name = "mlx-ffi-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+description = "MLX backend that delegates ops to the mlx-sys C ABI shim"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+mlx-sys = { path = "../mlx-sys" }
+smallvec = { workspace = true }
+parking_lot = "0.12"
+
+[dev-dependencies]
+mlx-conformance = { path = "../mlx-conformance" }

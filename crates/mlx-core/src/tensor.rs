@@ -24,7 +24,8 @@ impl Device {
     pub fn default_device() -> Self {
         #[cfg(target_os = "macos")]
         {
-            Device::Gpu
+            // TODO: Enable Metal backend when available.
+            Device::Cpu
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -359,6 +360,20 @@ impl Tensor {
     pub fn rms_norm(&self, eps: f32) -> Tensor {
         self.lazy_op(
             OpKind::RmsNorm { eps },
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
+    }
+
+    /// Apply Rotary Positional Embeddings.
+    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+        self.lazy_op(
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            },
             SmallVec::from_slice(&[self.node_id]),
             self.shape.clone(),
             self.dtype,
