@@ -10,8 +10,7 @@ This checklist validates progress aligned with the Strangler Fig approach and th
 - [x] Ensure `just ci` passes on a fresh clone without `MLX_SRC`.
 - [ ] Add `CONTRIBUTING.md` with dev workflows (optional).
 
-### M1: Backend Trait + Dispatch ("Narrow Waist") ✅
-
+### M1: Backend Trait + Dispatch (“Narrow Waist”) ✅
 - [x] Define backend trait contract in `crates/mlx-core` (or a dedicated crate) including dtype/shape/device semantics.
 - [x] Route a minimal op set through backend dispatch: add/mul/matmul/sum.
 - [x] Add backend selection at tensor creation time.
