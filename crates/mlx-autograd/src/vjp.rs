@@ -56,11 +56,8 @@ pub fn vjp(
                 }
                 Some(ax) => {
                     // sum_axis: unsqueeze the reduced axis, then broadcast
-                    let resolved = if *ax < 0 {
-                        (input_shape.ndim() as i32 + ax) as usize
-                    } else {
-                        *ax as usize
-                    };
+                    // axis is already resolved (non-negative) by Tensor::sum_axis
+                    let resolved = *ax as usize;
                     let mut unsqueezed = grad_output.shape().0.clone();
                     unsqueezed.insert(resolved, 1);
                     let reshaped = grad_output.reshape(&Shape::new(unsqueezed))?;
