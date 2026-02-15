@@ -225,7 +225,7 @@ fn transpose(inputs: &[NodeInput<'_>], axes: Option<&[usize]>) -> Result<Vec<f32
         let mut remaining = flat;
         let mut old_flat = 0;
         for dim_idx in 0..ndim {
-            let new_dim_size: usize = new_shape[dim_idx + 1..].iter().product::<usize>().max(1);
+            let new_dim_size: usize = new_shape[dim_idx + 1..].iter().product::<usize>();
             let coord = remaining / new_dim_size;
             remaining %= new_dim_size;
             // This coord in the new tensor corresponds to perm[dim_idx] axis in old tensor.
@@ -286,6 +286,9 @@ fn layer_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<
         return Ok(a.data.to_vec());
     }
     let last_dim = a.shape.0[ndim - 1] as usize;
+    if last_dim == 0 || a.data.is_empty() {
+        return Ok(a.data.to_vec());
+    }
     let outer = a.data.len() / last_dim;
 
     let mut result = vec![0.0f32; a.data.len()];
@@ -459,6 +462,9 @@ fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Ve
         return Ok(a.data.to_vec());
     }
     let last_dim = a.shape.0[ndim - 1] as usize;
+    if last_dim == 0 || a.data.is_empty() {
+        return Ok(a.data.to_vec());
+    }
     let outer = a.data.len() / last_dim;
 
     let mut result = vec![0.0f32; a.data.len()];

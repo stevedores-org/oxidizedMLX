@@ -749,4 +749,26 @@ mod tests {
         let vals = s.to_vec_f32().unwrap();
         assert_eq!(vals.len(), 0);
     }
+
+    #[test]
+    fn test_layer_norm_zero_dim() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 0]), &cpu()).unwrap();
+        let y = x.layer_norm(1e-5).to_vec_f32().unwrap();
+        assert_eq!(y.len(), 0);
+    }
+
+    #[test]
+    fn test_rms_norm_zero_dim() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 0]), &cpu()).unwrap();
+        let y = x.rms_norm(1e-5).to_vec_f32().unwrap();
+        assert_eq!(y.len(), 0);
+    }
+
+    #[test]
+    fn test_transpose_zero_dim() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 0, 3]), &cpu()).unwrap();
+        let y = x.transpose(None).unwrap();
+        assert_eq!(y.shape(), &Shape::new(vec![3, 0, 2]));
+        assert_eq!(y.to_vec_f32().unwrap().len(), 0);
+    }
 }
