@@ -44,6 +44,8 @@ pub enum OpKind {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
 
     // ── Reductions ──────────────────────────────────────────────────────
     Sum {
@@ -305,6 +307,8 @@ enum OpKey {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
     Sum {
         axis: Option<i32>,
     },
@@ -377,6 +381,8 @@ impl OpKey {
             OpKind::Mul => OpKey::Mul,
             OpKind::Div => OpKey::Div,
             OpKind::Neg => OpKey::Neg,
+            OpKind::Exp => OpKey::Exp,
+            OpKind::Log => OpKey::Log,
             OpKind::Sum { axis } => OpKey::Sum { axis: *axis },
             OpKind::Mean { axis } => OpKey::Mean { axis: *axis },
             OpKind::Max { axis } => OpKey::Max { axis: *axis },
@@ -530,6 +536,7 @@ mod tests {
             meta.clone(),
             Some(&[1.0, 2.0]),
         );
+        // Constants must NOT be deduplicated — they may receive independent gradients
         assert_ne!(a, b);
         assert_eq!(g.len(), 2);
     }
