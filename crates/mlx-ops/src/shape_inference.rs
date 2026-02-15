@@ -95,10 +95,35 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Reshape: output shape is specified in the op.
-        OpKind::Reshape { new_shape } => Ok(new_shape.clone()),
+        OpKind::Reshape { new_shape } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            if a.numel() != new_shape.numel() {
+                return Err(ShapeError::Mismatch(format!(
+                    "reshape cannot change numel from {} to {}",
+                    a.numel(),
+                    new_shape.numel()
+                )));
+            }
+            Ok(new_shape.clone())
+        }
 
         // Broadcast: output shape is the target shape.
-        OpKind::Broadcast { target_shape } => Ok(target_shape.clone()),
+        OpKind::Broadcast { target_shape } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            // Validate broadcast compatibility.
+            let result = crate::broadcast_shapes(a, target_shape)
+                .ok_or_else(|| ShapeError::Mismatch(format!("cannot broadcast {a} to {target_shape}")))?;
+            if &result != target_shape {
+                return Err(ShapeError::Mismatch(format!(
+                    "broadcast result {result} does not match target {target_shape}"
+                )));
+            }
+            Ok(target_shape.clone())
+        }
 
         // Backward ops: output shape = input shape (must match grad_output shape).
         OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
@@ -121,10 +146,28 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let ndim = a.ndim();
             let perm: Vec<usize> = match axes {
-                Some(ax) => ax.clone(),
-                None => (0..a.ndim()).rev().collect(),
+                Some(ax) => {
+                    if ax.len() != ndim {
+                        return Err(ShapeError::Mismatch(format!(
+                            "transpose axes length {} does not match ndim {}",
+                            ax.len(),
+                            ndim
+                        )));
+                    }
+                    ax.clone()
+                }
+                None => (0..ndim).rev().collect(),
             };
+
+            // Validate permutation indices.
+            for &ax in &perm {
+                if ax >= ndim {
+                    return Err(ShapeError::InvalidAxis { axis: ax as i32, ndim });
+                }
+            }
+
             let new_dims: Vec<i64> = perm.iter().map(|&ax| a.0[ax]).collect();
             Ok(Shape::new(new_dims))
         }
