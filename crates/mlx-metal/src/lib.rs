@@ -109,11 +109,26 @@ kernel void add_f32(device const float* a [[buffer(0)]],
                 ));
             }
 
+            let numel = meta.shape.numel() as usize;
+
+            // Validate input lengths match expected output size.
+            if inputs[0].data.len() != numel || inputs[1].data.len() != numel {
+                return Err(MlxError::ShapeMismatch {
+                    expected: meta.shape.0.clone(),
+                    got: vec![inputs[0].data.len() as i64, inputs[1].data.len() as i64],
+                });
+            }
+
+            // Fast-path: empty tensor — skip GPU dispatch entirely.
+            if numel == 0 {
+                return Ok(Vec::new());
+            }
+
             let a_buf = self.ctx.data_to_buffer(inputs[0].data);
             let b_buf = self.ctx.data_to_buffer(inputs[1].data);
 
-            let numel = meta.shape.numel() as u64;
-            let out_bytes = numel * std::mem::size_of::<f32>() as u64;
+            let numel_u64 = numel as u64;
+            let out_bytes = numel_u64 * std::mem::size_of::<f32>() as u64;
             let out_buf = self
                 .ctx
                 .device()
@@ -127,11 +142,14 @@ kernel void add_f32(device const float* a [[buffer(0)]],
             encoder.set_buffer(2, Some(&out_buf), 0);
 
             let thread_group_size = MTLSize::new(
-                self.ctx.add_pipeline.thread_execution_width().min(numel),
+                self.ctx
+                    .add_pipeline
+                    .thread_execution_width()
+                    .min(numel_u64),
                 1,
                 1,
             );
-            let grid_size = MTLSize::new(numel, 1, 1);
+            let grid_size = MTLSize::new(numel_u64, 1, 1);
             encoder.dispatch_threads(grid_size, thread_group_size);
             encoder.end_encoding();
 
@@ -140,7 +158,7 @@ kernel void add_f32(device const float* a [[buffer(0)]],
 
             let result = unsafe {
                 let ptr = out_buf.contents() as *const f32;
-                std::slice::from_raw_parts(ptr, numel as usize).to_vec()
+                std::slice::from_raw_parts(ptr, numel).to_vec()
             };
 
             Ok(result)
