@@ -24,7 +24,7 @@ fn box_tensor(t: Tensor) -> *mut mlx_tensor_t {
     Box::into_raw(Box::new(t)) as *mut mlx_tensor_t
 }
 
-unsafe fn ref_tensor(p: *mut mlx_tensor_t) -> &'_ Tensor {
+unsafe fn ref_tensor<'a>(p: *mut mlx_tensor_t) -> &'a Tensor {
     unsafe { &*(p as *const Tensor) }
 }
 
@@ -32,7 +32,7 @@ fn box_device(d: Device) -> *mut mlx_device_t {
     Box::into_raw(Box::new(d)) as *mut mlx_device_t
 }
 
-unsafe fn ref_device(p: *mut mlx_device_t) -> &'_ Device {
+unsafe fn ref_device<'a>(p: *mut mlx_device_t) -> &'a Device {
     unsafe { &*(p as *const Device) }
 }
 
@@ -354,7 +354,7 @@ pub unsafe extern "C" fn mlxrs_shape(
     if out_len == 0 {
         return needed as c_int;
     }
-    let copy_len = needed.min(out_len as usize);
+    let copy_len = needed.min(out_len);
     if copy_len > 0 && out_ptr.is_null() {
         return -1;
     }
