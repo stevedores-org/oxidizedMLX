@@ -3,6 +3,8 @@
 //! Provides a minimal Metal runtime for smoke testing GPU dispatch.
 
 use mlx_core::Result;
+#[cfg(not(target_os = "macos"))]
+use mlx_core::MlxError;
 
 #[cfg(target_os = "macos")]
 mod buffers;
@@ -20,9 +22,10 @@ pub use context::MetalContext;
 
 #[cfg(not(target_os = "macos"))]
 mod stubs {
-    use mlx_core::{MlxError, Result};
+    use crate::{MlxError, Result};
 
     /// Stub context for non-macOS platforms.
+    #[derive(Clone, Copy)]
     pub struct MetalContext;
 
     impl MetalContext {
@@ -42,6 +45,14 @@ mod stubs {
     /// Stub buffer type for non-macOS platforms.
     pub struct MetalBuffer<T> {
         _phantom: std::marker::PhantomData<T>,
+    }
+
+    impl<T> Clone for MetalBuffer<T> {
+        fn clone(&self) -> Self {
+            Self {
+                _phantom: std::marker::PhantomData,
+            }
+        }
     }
 
     impl<T> MetalBuffer<T> {
