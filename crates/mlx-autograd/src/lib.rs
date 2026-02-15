@@ -348,6 +348,55 @@ mod tests {
         mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
     }
 
+    // ── Broadcast gradient checks ─────────────────────────────────────
+
+    #[test]
+    fn test_grad_check_broadcast_rank_extension() {
+        // [3] broadcast to [2,3], then sum_all
+        let x_data = [1.0, 2.0, 3.0];
+        let target_shape = Shape::new(vec![2, 3]);
+
+        let f = |x: &Tensor| x.broadcast_to(&target_shape)?.sum_all();
+
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_check_broadcast_dim_expansion() {
+        // [1,3] broadcast to [2,3], then sum_all
+        let x_data = [1.0, 2.0, 3.0];
+        let target_shape = Shape::new(vec![2, 3]);
+
+        let f = |x: &Tensor| x.broadcast_to(&target_shape)?.sum_all();
+
+        let x = t(&x_data, &[1, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[1, 3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_check_broadcast_combined() {
+        // [3] broadcast to [2,3,3] via rank extension + dim expansion
+        let x_data = [1.0, 2.0, 3.0];
+        let target_shape = Shape::new(vec![2, 1, 3]);
+
+        let f = |x: &Tensor| x.broadcast_to(&target_shape)?.sum_all();
+
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    // ── Value + grad ────────────────────────────────────────────────────
+
     #[test]
     fn test_value_and_grad() {
         let x = t(&[2.0, 3.0], &[2]);
