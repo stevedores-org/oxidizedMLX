@@ -243,7 +243,6 @@ mod tests {
         assert_eq!(stream.get_buffer(c).unwrap(), vec![4.0, 6.0]);
     }
 
-<<<<<<< HEAD
     fn fresh_stream() -> Stream {
         Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))
     }
