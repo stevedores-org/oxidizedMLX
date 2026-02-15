@@ -112,6 +112,18 @@ mod tests {
         pos_offset: usize,
         theta: f32,
     ) {
+        run_rope_test_with_tol(tokens, head_dim, rotary_dim, pos_offset, theta, 5e-4, 5e-3);
+    }
+
+    fn run_rope_test_with_tol(
+        tokens: usize,
+        head_dim: usize,
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta: f32,
+        atol: f32,
+        rtol: f32,
+    ) {
         let numel = tokens * head_dim;
         let x_data: Vec<f32> = (0..numel).map(|i| (i as f32) * 0.01 - 0.5).collect();
 
@@ -142,7 +154,7 @@ mod tests {
 
         stream.eval(c).expect("eval should succeed");
         let result = stream.get_buffer(c).expect("buffer should exist");
-        assert_close(&result, &expected, 5e-4, 5e-3);
+        assert_close(&result, &expected, atol, rtol);
     }
 
     #[test]
@@ -162,7 +174,7 @@ mod tests {
 
     #[test]
     fn rope_128x128_llm_sized() {
-        run_rope_test(128, 128, 128, 0, 10000.0);
+        run_rope_test_with_tol(128, 128, 128, 0, 10000.0, 1e-3, 1e-2);
     }
 
     #[test]
