@@ -4,6 +4,8 @@
 //! sharing on Apple Silicon via Metal and a minimal runtime for GPU dispatch.
 
 #[cfg(target_os = "macos")]
+mod attention;
+#[cfg(target_os = "macos")]
 mod backend;
 #[cfg(target_os = "macos")]
 mod buffers;

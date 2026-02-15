@@ -59,6 +59,10 @@ impl Backend for CpuRefBackend {
             OpKind::LayerNorm { eps } => layer_norm(inputs, *eps, output_meta),
             OpKind::RmsNorm { eps } => rms_norm(inputs, *eps, output_meta),
             OpKind::Broadcast { target_shape } => broadcast(inputs, target_shape),
+            OpKind::ScaledMaskedSoftmax { scale, causal } => {
+                scaled_masked_softmax(inputs, *scale, *causal)
+            }
+            OpKind::Attention { scale, causal } => cpu_attention(inputs, *scale, *causal),
             OpKind::LayerNormVjp { eps } => layer_norm_vjp(inputs, *eps),
             OpKind::RmsNormVjp { eps } => rms_norm_vjp(inputs, *eps),
             OpKind::RoPE {
@@ -479,6 +483,149 @@ fn rms_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Ve
         }
     }
     Ok(result)
+}
+
+fn scaled_masked_softmax(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    if a.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "ScaledMaskedSoftmax requires 2D input [Tq, Tk]".into(),
+        ));
+    }
+    let tq = a.shape.0[0] as usize;
+    let tk = a.shape.0[1] as usize;
+
+    let mut data = vec![0.0f32; tq * tk];
+
+    for i in 0..tq {
+        // Scale + mask
+        for j in 0..tk {
+            let idx = i * tk + j;
+            let mut val = a.data[idx] * scale;
+            if causal && j > i {
+                val = -1e9;
+            }
+            data[idx] = val;
+        }
+
+        // Numerically stable softmax per row
+        let row_start = i * tk;
+        let mut max_val = f32::NEG_INFINITY;
+        for j in 0..tk {
+            if data[row_start + j] > max_val {
+                max_val = data[row_start + j];
+            }
+        }
+        let mut sum_exp = 0.0f32;
+        for j in 0..tk {
+            data[row_start + j] = (data[row_start + j] - max_val).exp();
+            sum_exp += data[row_start + j];
+        }
+        for j in 0..tk {
+            data[row_start + j] /= sum_exp;
+        }
+    }
+    Ok(data)
+}
+
+fn cpu_matmul_raw(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0f32;
+            for p in 0..k {
+                sum += a[i * k + p] * b[p * n + j];
+            }
+            out[i * n + j] = sum;
+        }
+    }
+    out
+}
+
+fn cpu_transpose_2d(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * cols];
+    for r in 0..rows {
+        for c in 0..cols {
+            out[c * rows + r] = data[r * cols + c];
+        }
+    }
+    out
+}
+
+fn cpu_attention(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<Vec<f32>> {
+    if inputs.len() != 3 {
+        return Err(MlxError::InvalidArgument(
+            "Attention requires exactly 3 inputs [Q, K, V]".into(),
+        ));
+    }
+    let q = require_input(inputs, 0)?;
+    let k = require_input(inputs, 1)?;
+    let v = require_input(inputs, 2)?;
+
+    if q.shape.ndim() != 2 || k.shape.ndim() != 2 || v.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Attention inputs must be 2D".into(),
+        ));
+    }
+
+    let tq = q.shape.0[0] as usize;
+    let dh = q.shape.0[1] as usize;
+    let tk = k.shape.0[0] as usize;
+    let dh_k = k.shape.0[1] as usize;
+    let tk_v = v.shape.0[0] as usize;
+    let dh_v = v.shape.0[1] as usize;
+
+    if dh != dh_k {
+        return Err(MlxError::ShapeMismatch {
+            expected: vec![tq as i64, dh as i64],
+            got: vec![tk as i64, dh_k as i64],
+        });
+    }
+    if tk != tk_v || dh != dh_v {
+        return Err(MlxError::ShapeMismatch {
+            expected: vec![tk as i64, dh as i64],
+            got: vec![tk_v as i64, dh_v as i64],
+        });
+    }
+
+    // 1. Transpose K: [Tk, Dh] -> [Dh, Tk]
+    let kt = cpu_transpose_2d(k.data, tk, dh);
+
+    // 2. scores = Q @ K^T: [Tq, Dh] @ [Dh, Tk] -> [Tq, Tk]
+    let scores = cpu_matmul_raw(q.data, &kt, tq, dh, tk);
+
+    // 3. Scaled masked softmax on scores
+    let mut probs = vec![0.0f32; tq * tk];
+    for i in 0..tq {
+        for j in 0..tk {
+            let idx = i * tk + j;
+            let mut val = scores[idx] * scale;
+            if causal && j > i {
+                val = -1e9;
+            }
+            probs[idx] = val;
+        }
+        let row_start = i * tk;
+        let mut max_val = f32::NEG_INFINITY;
+        for j in 0..tk {
+            if probs[row_start + j] > max_val {
+                max_val = probs[row_start + j];
+            }
+        }
+        let mut sum_exp = 0.0f32;
+        for j in 0..tk {
+            probs[row_start + j] = (probs[row_start + j] - max_val).exp();
+            sum_exp += probs[row_start + j];
+        }
+        for j in 0..tk {
+            probs[row_start + j] /= sum_exp;
+        }
+    }
+
+    // 4. Y = P @ V: [Tq, Tk] @ [Tk, Dh] -> [Tq, Dh]
+    let y = cpu_matmul_raw(&probs, v.data, tq, tk, dh);
+
+    Ok(y)
 }
 
 fn rope(inputs: &[NodeInput<'_>], base: f32, offset: usize, traditional: bool) -> Result<Vec<f32>> {

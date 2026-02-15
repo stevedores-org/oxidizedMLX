@@ -147,6 +147,59 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             Ok((*original_input).clone())
         }
 
+        // ScaledMaskedSoftmax preserves shape (must be 2D).
+        OpKind::ScaledMaskedSoftmax { .. } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            if a.ndim() != 2 {
+                return Err(ShapeError::Mismatch(
+                    "ScaledMaskedSoftmax requires 2D input [Tq, Tk]".into(),
+                ));
+            }
+            Ok((*a).clone())
+        }
+
+        // Attention: [Q, K, V] -> [Tq, Dh]
+        OpKind::Attention { .. } => {
+            let q = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing Q (input 0)".into()))?;
+            let k = inputs
+                .get(1)
+                .ok_or(ShapeError::Mismatch("missing K (input 1)".into()))?;
+            let v = inputs
+                .get(2)
+                .ok_or(ShapeError::Mismatch("missing V (input 2)".into()))?;
+            if q.ndim() != 2 || k.ndim() != 2 || v.ndim() != 2 {
+                return Err(ShapeError::Mismatch(
+                    "Attention inputs must be 2D".into(),
+                ));
+            }
+            let tq = q.0[0];
+            let dh = q.0[1];
+            let tk = k.0[0];
+            let dh_k = k.0[1];
+            let tk_v = v.0[0];
+            let dh_v = v.0[1];
+            if dh != dh_k {
+                return Err(ShapeError::Mismatch(format!(
+                    "Q head_dim {} != K head_dim {}", dh, dh_k
+                )));
+            }
+            if tk != tk_v {
+                return Err(ShapeError::Mismatch(format!(
+                    "K seq_len {} != V seq_len {}", tk, tk_v
+                )));
+            }
+            if dh != dh_v {
+                return Err(ShapeError::Mismatch(format!(
+                    "Q head_dim {} != V head_dim {}", dh, dh_v
+                )));
+            }
+            Ok(Shape::new(vec![tq, dh]))
+        }
+
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
             let a = inputs

@@ -88,6 +88,16 @@ pub enum OpKind {
         target_shape: Shape,
     },
 
+    // ── Attention ──────────────────────────────────────────────────
+    /// Fused scale + causal-mask + softmax along last axis.
+    /// Input: scores [Tq, Tk], output: probs [Tq, Tk]
+    ScaledMaskedSoftmax { scale: f32, causal: bool },
+
+    /// Full single-head attention composition.
+    /// Inputs: [Q, K, V] where Q=[Tq,Dh], K=[Tk,Dh], V=[Tk,Dh]
+    /// Output: Y=[Tq,Dh]
+    Attention { scale: f32, causal: bool },
+
     // ── Backward (VJP) ops ──────────────────────────────────────────
     /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
     LayerNormVjp {
@@ -282,6 +292,9 @@ enum OpKey {
     Broadcast { target_shape: Vec<i64> },
     LayerNormVjp { eps_bits: u32 },
     RmsNormVjp { eps_bits: u32 },
+    ScaledMaskedSoftmax { scale_bits: u32, causal: bool },
+    Attention { scale_bits: u32, causal: bool },
+    RoPE { base_bits: u32, offset: usize, traditional: bool },
 }
 
 impl OpKey {
@@ -319,6 +332,19 @@ impl OpKey {
             },
             OpKind::RmsNormVjp { eps } => OpKey::RmsNormVjp {
                 eps_bits: eps.to_bits(),
+            },
+            OpKind::ScaledMaskedSoftmax { scale, causal } => OpKey::ScaledMaskedSoftmax {
+                scale_bits: scale.to_bits(),
+                causal: *causal,
+            },
+            OpKind::Attention { scale, causal } => OpKey::Attention {
+                scale_bits: scale.to_bits(),
+                causal: *causal,
+            },
+            OpKind::RoPE { base, offset, traditional } => OpKey::RoPE {
+                base_bits: base.to_bits(),
+                offset: *offset,
+                traditional: *traditional,
             },
         }
     }
