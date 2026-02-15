@@ -33,5 +33,5 @@ mod tests {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn smoke_add_u32_non_macos() {
-    assert!(true);
+    // Metal tests are macOS-only; this ensures the test binary compiles on Linux CI.
 }

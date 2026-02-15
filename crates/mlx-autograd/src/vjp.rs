@@ -56,11 +56,8 @@ pub fn vjp(
                 }
                 Some(ax) => {
                     // sum_axis: unsqueeze the reduced axis, then broadcast
-                    let resolved = if *ax < 0 {
-                        (input_shape.ndim() as i32 + ax) as usize
-                    } else {
-                        *ax as usize
-                    };
+                    // axis is already resolved (non-negative) by Tensor::sum_axis
+                    let resolved = *ax as usize;
                     let mut unsqueezed = grad_output.shape().0.clone();
                     unsqueezed.insert(resolved, 1);
                     let reshaped = grad_output.reshape(&Shape::new(unsqueezed))?;
@@ -100,6 +97,17 @@ pub fn vjp(
                 inv_perm[p] = i;
             }
             let grad_input = grad_output.transpose(Some(&inv_perm))?;
+            Ok(vec![grad_input])
+        }
+
+        // ── Normalization ───────────────────────────────────────────────
+        OpKind::LayerNorm { eps } => {
+            let grad_input = grad_output.layer_norm_vjp(&inputs[0], *eps)?;
+            Ok(vec![grad_input])
+        }
+
+        OpKind::RmsNorm { eps } => {
+            let grad_input = grad_output.rms_norm_vjp(&inputs[0], *eps)?;
             Ok(vec![grad_input])
         }
 
@@ -194,6 +202,52 @@ mod tests {
     }
 
     #[test]
+    fn test_vjp_layer_norm() {
+        let a = t(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let grad_out = t(&[1.0, 0.0, -1.0, 0.5, 0.5, 0.5], &[2, 3]);
+        let grads = vjp(
+            &OpKind::LayerNorm { eps: 1e-5 },
+            &[a],
+            &t(&[0.0; 6], &[2, 3]),
+            &grad_out,
+        )
+        .unwrap();
+        let result = grads[0].to_vec_f32().unwrap();
+        // Should be same shape as input
+        assert_eq!(result.len(), 6);
+        // LayerNorm grad should sum to ~0 per row (property of the normalization)
+        let row0_sum: f32 = result[0..3].iter().sum();
+        let row1_sum: f32 = result[3..6].iter().sum();
+        assert!(
+            row0_sum.abs() < 1e-5,
+            "row0 grad sum should be ~0, got {row0_sum}"
+        );
+        assert!(
+            row1_sum.abs() < 1e-5,
+            "row1 grad sum should be ~0, got {row1_sum}"
+        );
+    }
+
+    #[test]
+    fn test_vjp_rms_norm() {
+        let a = t(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let grad_out = t(&[1.0, 0.0, -1.0, 0.5, 0.5, 0.5], &[2, 3]);
+        let grads = vjp(
+            &OpKind::RmsNorm { eps: 1e-5 },
+            &[a],
+            &t(&[0.0; 6], &[2, 3]),
+            &grad_out,
+        )
+        .unwrap();
+        let result = grads[0].to_vec_f32().unwrap();
+        assert_eq!(result.len(), 6);
+        // RmsNorm grad doesn't have the zero-sum property, but should be finite
+        for &v in &result {
+            assert!(v.is_finite(), "grad should be finite");
+        }
+    }
+
+    #[test]
     fn test_vjp_sum_axis() {
         // Input [2,3], sum axis 0 -> [3]
         let a = t(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
@@ -208,5 +262,39 @@ mod tests {
         let result = grads[0].to_vec_f32().unwrap();
         // Each element in [2,3] should get grad 1.0 (broadcast from [3])
         assert_eq!(result, vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_scalar_to_vector() {
+        let a = t(&[2.0], &[1]);
+        let b = a.broadcast_to(&Shape::new(vec![3])).unwrap();
+        let grad_out = t(&[1.0, 2.0, 3.0], &[3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: b.shape().clone(),
+            },
+            &[a],
+            &b,
+            &grad_out,
+        )
+        .unwrap();
+        assert_eq!(grads[0].to_vec_f32().unwrap(), vec![6.0]);
+    }
+
+    #[test]
+    fn test_vjp_broadcast_row() {
+        let a = t(&[1.0, 2.0], &[2, 1]);
+        let b = a.broadcast_to(&Shape::new(vec![2, 3])).unwrap();
+        let grad_out = t(&[1.0, 1.0, 1.0, 2.0, 2.0, 2.0], &[2, 3]);
+        let grads = vjp(
+            &OpKind::Broadcast {
+                target_shape: b.shape().clone(),
+            },
+            &[a],
+            &b,
+            &grad_out,
+        )
+        .unwrap();
+        assert_eq!(grads[0].to_vec_f32().unwrap(), vec![3.0, 6.0]);
     }
 }

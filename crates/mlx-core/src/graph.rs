@@ -85,6 +85,16 @@ pub enum OpKind {
     Broadcast {
         target_shape: Shape,
     },
+
+    // ── Backward (VJP) ops ──────────────────────────────────────────
+    /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
+    LayerNormVjp {
+        eps: f32,
+    },
+    /// RmsNorm backward: inputs = [grad_output, input], produces grad_input.
+    RmsNormVjp {
+        eps: f32,
+    },
 }
 
 /// The computation graph arena.
@@ -117,9 +127,9 @@ impl Graph {
         id
     }
 
-    /// Get a node by ID.
+    /// Get a node by ID (O(1) — IDs are sequential indices).
     pub fn get(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.iter().find(|n| n.id == id)
+        self.nodes.get(id.0 as usize).filter(|n| n.id == id)
     }
 
     /// Topological sort of the graph rooted at `outputs`.

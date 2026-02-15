@@ -1,14 +1,14 @@
 //! Command encoding helpers.
 
 use metal::{MTLCommandBufferStatus, MTLSize};
-use mlx_core::{MlxError, Result};
 
 use crate::buffers::MetalBuffer;
 use crate::context::MetalContext;
+use crate::{MetalError, Result};
 
 pub(crate) fn run_add_u32_impl(ctx: &MetalContext, a: &[u32], b: &[u32]) -> Result<Vec<u32>> {
     if a.len() != b.len() {
-        return Err(MlxError::InvalidArgument(format!(
+        return Err(MetalError::InvalidArgument(format!(
             "input length mismatch: a={}, b={}",
             a.len(),
             b.len()
@@ -55,12 +55,11 @@ pub(crate) fn run_add_u32_impl(ctx: &MetalContext, a: &[u32], b: &[u32]) -> Resu
     command_buffer.wait_until_completed();
 
     if command_buffer.status() != MTLCommandBufferStatus::Completed {
-        let status = command_buffer.status();
-        return Err(MlxError::InvalidArgument(format!(
+        return Err(MetalError::InvalidArgument(format!(
             "command buffer failed with status {:?}",
-            status
+            command_buffer.status()
         )));
     }
 
-    out_buf.read_to_vec()
+    Ok(out_buf.read_to_vec())
 }
