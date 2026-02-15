@@ -12,8 +12,12 @@ fn cpu() -> Device {
 
 #[test]
 fn golden_add() {
-    let a = Tensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &Shape::new(vec![2, 3]), &cpu())
-        .unwrap();
+    let a = Tensor::from_f32(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &Shape::new(vec![2, 3]),
+        &cpu(),
+    )
+    .unwrap();
     let b = Tensor::from_f32(
         &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
         &Shape::new(vec![2, 3]),

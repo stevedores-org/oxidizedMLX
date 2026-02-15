@@ -30,7 +30,10 @@ fn smoke() {
     let a = Tensor::from_f32(&[1.0, 2.0, 3.0, 4.0], &Shape::new(vec![2, 2]), &dev).unwrap();
     let b = Tensor::from_f32(&[5.0, 6.0, 7.0, 8.0], &Shape::new(vec![2, 2]), &dev).unwrap();
     let c = a.matmul(&b).unwrap();
-    println!("matmul [[1,2],[3,4]] @ [[5,6],[7,8]] = {:?}", c.to_vec_f32().unwrap());
+    println!(
+        "matmul [[1,2],[3,4]] @ [[5,6],[7,8]] = {:?}",
+        c.to_vec_f32().unwrap()
+    );
 
     // add smoke
     let x = Tensor::from_f32(&[1.0, 2.0, 3.0], &Shape::new(vec![3]), &dev).unwrap();

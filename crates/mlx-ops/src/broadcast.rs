@@ -85,9 +85,6 @@ mod tests {
     fn test_higher_rank() {
         let a = Shape::new(vec![1, 3, 1]);
         let b = Shape::new(vec![2, 1, 4]);
-        assert_eq!(
-            broadcast_shapes(&a, &b),
-            Some(Shape::new(vec![2, 3, 4]))
-        );
+        assert_eq!(broadcast_shapes(&a, &b), Some(Shape::new(vec![2, 3, 4])));
     }
 }
