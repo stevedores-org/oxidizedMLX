@@ -102,12 +102,12 @@ pub fn vjp(
 
         // ── Normalization ───────────────────────────────────────────────
         OpKind::LayerNorm { eps } => {
-            let grad_input = grad_output.layer_norm_vjp(&inputs[0], *eps);
+            let grad_input = grad_output.layer_norm_vjp(&inputs[0], *eps)?;
             Ok(vec![grad_input])
         }
 
         OpKind::RmsNorm { eps } => {
-            let grad_input = grad_output.rms_norm_vjp(&inputs[0], *eps);
+            let grad_input = grad_output.rms_norm_vjp(&inputs[0], *eps)?;
             Ok(vec![grad_input])
         }
 

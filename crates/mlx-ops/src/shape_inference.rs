@@ -103,12 +103,20 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         // Broadcast: output shape is the target shape.
         OpKind::Broadcast { target_shape } => Ok(target_shape.clone()),
 
-        // Backward ops: output shape = input shape (same as grad_output shape).
+        // Backward ops: output shape = input shape (must match grad_output shape).
         OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
-            let a = inputs
+            let grad_output = inputs
                 .first()
-                .ok_or(ShapeError::Mismatch("missing input".into()))?;
-            Ok((*a).clone())
+                .ok_or(ShapeError::Mismatch("missing grad_output (input 0)".into()))?;
+            let original_input = inputs.get(1).ok_or(ShapeError::Mismatch(
+                "missing original input (input 1)".into(),
+            ))?;
+            if grad_output.0 != original_input.0 {
+                return Err(ShapeError::Mismatch(
+                    "VJP grad_output and input shapes must match".into(),
+                ));
+            }
+            Ok((*original_input).clone())
         }
 
         // Transpose: permute dimensions.
