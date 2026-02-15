@@ -95,6 +95,18 @@ pub enum OpKind {
     RmsNormVjp {
         eps: f32,
     },
+    /// Softmax backward: inputs = [grad_output, softmax_output], produces grad_input.
+    SoftmaxVjp {
+        axis: i32,
+    },
+    /// SiLU backward: inputs = [grad_output, original_input], produces grad_input.
+    SiluVjp,
+    /// GELU backward: inputs = [grad_output, original_input], produces grad_input.
+    GeluVjp,
+
+    // ── Elementwise (misc) ──────────────────────────────────────────
+    /// Element-wise square root.
+    Sqrt,
 }
 
 /// The computation graph arena.

@@ -111,6 +111,24 @@ pub fn vjp(
             Ok(vec![grad_input])
         }
 
+        // ── Activations ────────────────────────────────────────────────
+        OpKind::Softmax { axis } => {
+            // Recompute softmax output from the forward input
+            let s = inputs[0].softmax(*axis)?;
+            let grad_input = grad_output.softmax_vjp(&s, *axis)?;
+            Ok(vec![grad_input])
+        }
+
+        OpKind::Silu => {
+            let grad_input = grad_output.silu_vjp(&inputs[0])?;
+            Ok(vec![grad_input])
+        }
+
+        OpKind::Gelu => {
+            let grad_input = grad_output.gelu_vjp(&inputs[0])?;
+            Ok(vec![grad_input])
+        }
+
         // ── Broadcasting (grad is reduced back to original shape) ────
         OpKind::Broadcast { .. } => {
             // Reverse of broadcast: sum over the broadcasted dimensions
@@ -135,6 +153,19 @@ pub fn vjp(
                 }
             }
 
+            Ok(vec![grad_input])
+        }
+
+        // ── Misc elementwise ──────────────────────────────────────────
+        OpKind::Sqrt => {
+            // d(sqrt(x))/dx = 0.5 / sqrt(x)
+            // But we need sqrt(x) = output, so: grad / (2 * output)
+            let two = Tensor::from_f32(
+                &vec![2.0; _output.numel() as usize],
+                _output.shape(),
+                _output.device(),
+            )?;
+            let grad_input = grad_output.div(&_output.mul(&two)?)?;
             Ok(vec![grad_input])
         }
 
