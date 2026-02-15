@@ -203,7 +203,6 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
             args.push(format!("milestone={}", n));
         }
 
-        let issue: Issue = gh_json_with_retries_owned(args, 5)?;
         let issue: Issue = gh_json_with_retries_owned(args, MAX_ATTEMPTS)?;
 
         // Apply labels.
