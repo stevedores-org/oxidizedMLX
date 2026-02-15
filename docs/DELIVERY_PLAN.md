@@ -2,7 +2,7 @@
 
 This is a delivery plan to turn an MLX-like stack into a Rust-first runtime without a big-bang rewrite. The ordering is deliberate: **correctness and conformance first**, performance and GPU/Metal later.
 
-## Epic 0: Repo Baseline (DX + CI)
+## Epic 0: Repo Baseline (DX + CI) ✅
 
 Goal: contributors can clone, run `just ci`, and get fast feedback without special environment variables.
 
@@ -17,7 +17,7 @@ Acceptance:
 - `just ci` passes without requiring the upstream MLX checkout.
 - `mlx-sys` is excluded from default lint/test paths unless explicitly requested.
 
-## Epic 1: Backend Abstraction (The “Narrow Waist”)
+## Epic 1: Backend Abstraction (The “Narrow Waist”) ✅
 
 Goal: make “tensor API” independent from “execution backend”.
 
@@ -32,7 +32,7 @@ Acceptance:
 - A `Backend` trait (or equivalent) exists with explicit contracts for memory, shape, dtype, and dispatch.
 - A minimal set of ops route through backend dispatch (add/mul/matmul/reductions).
 
-## Epic 2: Core Tensor API (Safety + Ergonomics)
+## Epic 2: Core Tensor API (Safety + Ergonomics) ✅
 
 Goal: define a stable, safe Rust public API for tensors and scalar types.
 
@@ -47,7 +47,7 @@ Acceptance:
 - `Tensor` has clear ownership rules and no footguns around aliasing.
 - Errors are typed (not stringly-typed) at the public boundary.
 
-## Epic 3: CPU Reference Backend (Correctness Oracle)
+## Epic 3: CPU Reference Backend (Correctness Oracle) ✅
 
 Goal: have a deterministic correctness-first backend used for tests and conformance.
 
@@ -62,7 +62,7 @@ Acceptance:
 - Core ops (elementwise, matmul, reductions, broadcast) implemented and covered by unit + property tests.
 - Deterministic behavior for random seeds and floating point edge cases (documented where not possible).
 
-## Epic 4: Conformance Harness (Rust vs Python MLX)
+## Epic 4: Conformance Harness (Rust vs Python MLX) ✅
 
 Goal: compare behavior against upstream MLX (Python) to lock down semantics.
 
@@ -77,7 +77,7 @@ Acceptance:
 - A harness exists that runs a fixed suite of ops across shapes/dtypes and compares tolerances.
 - Conformance reports failures with repro snippets (inputs + op + expected vs got).
 
-## Epic 5: Autograd (Reverse-Mode AD)
+## Epic 5: Autograd (Reverse-Mode AD) ✅
 
 Goal: enable training and gradient-based optimization.
 
@@ -92,7 +92,7 @@ Acceptance:
 - Tape/graph representation with topological traversal and gradient accumulation.
 - Gradient tests for representative ops (matmul, sum, relu-like, broadcast).
 
-## Epic 6: NN Modules + Optimizers
+## Epic 6: NN Modules + Optimizers ✅
 
 Goal: basic training loop experience (modules, parameters, optimizers).
 
@@ -107,7 +107,7 @@ Acceptance:
 - Parameter container and state dict conventions are defined and tested.
 - AdamW + SGD implemented with unit tests against known small cases.
 
-## Epic 7: IO (safetensors + mmap)
+## Epic 7: IO (safetensors + mmap) ✅
 
 Goal: fast, safe model weight loading and basic tensor serialization.
 
@@ -122,7 +122,7 @@ Acceptance:
 - `mlx-io` implements safetensors read with clear safety boundaries.
 - Corrupt/invalid files produce actionable errors.
 
-## Epic 8: FFI Integration (Upstream MLX C++ via C ABI)
+## Epic 8: FFI Integration (Upstream MLX C++ via C ABI) ✅
 
 Goal: use upstream MLX where it makes sense, behind a stable C ABI shim.
 
@@ -137,7 +137,7 @@ Acceptance:
 - `mlx-sys` builds from `MLX_SRC` and exposes a minimal, versioned C ABI.
 - Safety boundaries are explicit (no hidden global state assumptions).
 
-## Epic 9: Metal Backend (macOS GPU)
+## Epic 9: Metal Backend (macOS GPU) 🚧
 
 Goal: a native Metal backend (or thin wrapper) with stable semantics.
 
@@ -150,7 +150,22 @@ Acceptance:
 
 - Minimal runtime scaffolding (queue, buffers, kernels) with conformance for the covered ops.
 
-## Epic 10: Benchmarks + Performance Program
+## Epic 10: Unified Buffer Abstraction & Zero-Copy 🚧
+
+Goal: Move away from eager host copies to a unified memory model.
+
+User stories:
+
+- As a backend author, I can receive and return opaque `Buffer` handles instead of `Vec<f32>`.
+- As a user, I can perform operations on Metal and only pull data to CPU when explicitly requested.
+- As a maintainer, I can implement zero-copy transfers between the FFI backend and the Rust runtime.
+
+Acceptance:
+
+- `Backend::eval_node` uses a trait/enum-based buffer system.
+- Conformance tests prove that `eval()` does not trigger unnecessary allocations.
+
+## Epic 11: Benchmarks + Performance Program
 
 Goal: measure and improve performance without regressing correctness.
 

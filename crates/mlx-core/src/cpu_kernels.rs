@@ -29,6 +29,14 @@ impl Backend for CpuRefBackend {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.iter().map(|x| -x).collect())
             }
+            OpKind::Exp => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.exp()).collect())
+            }
+            OpKind::Log => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.ln()).collect())
+            }
             OpKind::Sum { axis } => reduce_sum(inputs, *axis),
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
@@ -975,32 +983,36 @@ mod tests {
     #[test]
     fn test_rope_offsets() {
         let backend = CpuRefBackend;
-        let base = 10_000.0;
-        let offset = 100usize;
-        let traditional = false;
+        let theta = 10_000.0;
+        let pos_offset = 100usize;
+        let rotary_dim = 4;
         // Shape: 1 seq, 4 head_dim. total = 4 floats.
         let data = [1.0, 0.0, 0.0, 1.0];
         let result = backend
             .eval_node(
-                &OpKind::RoPE {
-                    base,
-                    offset,
-                    traditional,
+                &OpKind::Rope {
+                    rotary_dim,
+                    pos_offset,
+                    theta,
                 },
                 &[input(&data, vec![1, 4])],
                 &meta(vec![1, 4]),
             )
             .unwrap();
 
-        // Expected values (same logic as before)
+        // Expected values (interleaved)
+        // i=0: inv_freq = 1.0. angle = 100.
         let cos100 = 100.0f32.cos();
         let sin100 = 100.0f32.sin();
+        // i=1: inv_freq = 10000^-0.5 = 0.01. angle = 1.0.
         let cos1 = 1.0f32.cos();
         let sin1 = 1.0f32.sin();
 
+        // data[0]=1, data[1]=0 -> out[0]=cos, out[1]=sin
+        // data[2]=0, data[3]=1 -> out[2]=-sin, out[3]=cos
         assert!((result[0] - cos100).abs() < 1e-5);
-        assert!((result[2] - sin100).abs() < 1e-5);
-        assert!((result[1] - (-sin1)).abs() < 1e-5);
+        assert!((result[1] - sin100).abs() < 1e-5);
+        assert!((result[2] - (-sin1)).abs() < 1e-5);
         assert!((result[3] - cos1).abs() < 1e-5);
     }
 
@@ -1011,10 +1023,10 @@ mod tests {
         let numel = 128 * 128;
         let data = vec![1.0; numel];
         let result = backend.eval_node(
-            &OpKind::RoPE {
-                base: 10000.0,
-                offset: 0,
-                traditional: true,
+            &OpKind::Rope {
+                rotary_dim: 128,
+                pos_offset: 0,
+                theta: 10000.0,
             },
             &[input(&data, shape.clone())],
             &meta(shape.clone()),
