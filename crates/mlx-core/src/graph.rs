@@ -106,14 +106,6 @@ pub enum OpKind {
     RmsNormVjp {
         eps: f32,
     },
-
-    // ── Rotary Positional Embeddings ───────────────────────────────────
-    #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
-    RoPE {
-        base: f32,
-        offset: usize,
-        traditional: bool,
-    },
 }
 
 /// The computation graph arena.
@@ -318,11 +310,6 @@ enum OpKey {
         pos_offset: usize,
         theta_bits: u32,
     },
-    RoPE {
-        base_bits: u32,
-        offset: usize,
-        traditional: bool,
-    },
 }
 
 impl OpKey {
@@ -369,15 +356,6 @@ impl OpKey {
                 rotary_dim: *rotary_dim,
                 pos_offset: *pos_offset,
                 theta_bits: theta.to_bits(),
-            },
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
-            } => OpKey::RoPE {
-                base_bits: base.to_bits(),
-                offset: *offset,
-                traditional: *traditional,
             },
         }
     }

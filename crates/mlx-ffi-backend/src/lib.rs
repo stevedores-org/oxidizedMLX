@@ -296,8 +296,7 @@ impl Backend for MlxFfiBackend {
             OpKind::Broadcast { .. }
             | OpKind::LayerNormVjp { .. }
             | OpKind::RmsNormVjp { .. }
-            | OpKind::Rope { .. }
-            | OpKind::RoPE { .. } => Err(MlxError::InvalidArgument(format!(
+            | OpKind::Rope { .. } => Err(MlxError::InvalidArgument(format!(
                 "{op:?} not supported by FFI backend",
             ))),
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(

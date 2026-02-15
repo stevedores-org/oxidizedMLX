@@ -367,12 +367,12 @@ impl Tensor {
     }
 
     /// Apply Rotary Positional Embeddings.
-    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+    pub fn rope(&self, rotary_dim: usize, pos_offset: usize, theta: f32) -> Tensor {
         self.lazy_op(
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
             },
             SmallVec::from_slice(&[self.node_id]),
             self.shape.clone(),

@@ -138,9 +138,9 @@ pub fn vjp(
             Ok(vec![grad_input])
         }
 
-        // ── RoPE (not yet supported for backward) ───────────────────────
-        OpKind::RoPE { .. } => Err(MlxError::InvalidArgument(
-            "VJP not implemented for RoPE".into(),
+        // ── Rope (not yet supported for backward) ───────────────────────
+        OpKind::Rope { .. } => Err(MlxError::InvalidArgument(
+            "VJP not implemented for Rope".into(),
         )),
 
         _ => Err(MlxError::InvalidArgument(format!(

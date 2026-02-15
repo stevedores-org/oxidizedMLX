@@ -40,8 +40,7 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         | OpKind::Gelu
         | OpKind::Constant
         | OpKind::Parameter
-        | OpKind::Rope { .. }
-        | OpKind::RoPE { .. } => {
+        | OpKind::Rope { .. } => {
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
