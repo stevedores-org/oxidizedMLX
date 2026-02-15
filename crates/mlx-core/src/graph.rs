@@ -144,6 +144,28 @@ pub enum OpKind {
         offset: usize,
         traditional: bool,
     },
+
+    // ── Indexing / gathering ─────────────────────────────────────────────
+    /// Embedding lookup: gather rows from a weight matrix by index.
+    /// Inputs: [weight [vocab, dim], indices [seq_len]]
+    /// Output: [seq_len, dim]
+    Embedding,
+
+    /// Extract a contiguous slice along an axis.
+    /// Inputs: [input]
+    /// Output: narrowed tensor
+    Narrow {
+        axis: i32,
+        start: i64,
+        length: i64,
+    },
+
+    /// Concatenate tensors along an axis.
+    /// Inputs: [tensor_0, tensor_1, ...]
+    /// Output: concatenated tensor
+    Concatenate {
+        axis: i32,
+    },
 }
 
 /// The computation graph arena.
@@ -369,6 +391,15 @@ enum OpKey {
     SiluVjp,
     GeluVjp,
     Sqrt,
+    Embedding,
+    Narrow {
+        axis: i32,
+        start: i64,
+        length: i64,
+    },
+    Concatenate {
+        axis: i32,
+    },
 }
 
 impl OpKey {
@@ -439,6 +470,17 @@ impl OpKey {
             OpKind::SiluVjp => OpKey::SiluVjp,
             OpKind::GeluVjp => OpKey::GeluVjp,
             OpKind::Sqrt => OpKey::Sqrt,
+            OpKind::Embedding => OpKey::Embedding,
+            OpKind::Narrow {
+                axis,
+                start,
+                length,
+            } => OpKey::Narrow {
+                axis: *axis,
+                start: *start,
+                length: *length,
+            },
+            OpKind::Concatenate { axis } => OpKey::Concatenate { axis: *axis },
         }
     }
 }

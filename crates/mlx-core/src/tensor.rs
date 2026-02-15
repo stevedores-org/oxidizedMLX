@@ -559,6 +559,134 @@ impl Tensor {
         ))
     }
 
+    // ── Indexing / gathering ──────────────────────────────────────────
+
+    /// Embedding lookup: gather rows from this weight matrix [vocab, dim]
+    /// using `indices` [seq_len]. Returns [seq_len, dim].
+    pub fn embedding_lookup(&self, indices: &Tensor) -> Result<Tensor> {
+        if self.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "embedding_lookup: weight must be 2D [vocab_size, embed_dim]".into(),
+            ));
+        }
+        if indices.shape.ndim() != 1 {
+            return Err(MlxError::InvalidArgument(
+                "embedding_lookup: indices must be 1D [seq_len]".into(),
+            ));
+        }
+        let seq_len = indices.shape.0[0];
+        let embed_dim = self.shape.0[1];
+        Ok(self.lazy_op(
+            OpKind::Embedding,
+            SmallVec::from_slice(&[self.node_id, indices.node_id]),
+            Shape::new(vec![seq_len, embed_dim]),
+            self.dtype,
+        ))
+    }
+
+    /// Narrow (slice) along an axis: extract `length` elements starting at `start`.
+    pub fn narrow(&self, axis: i32, start: i64, length: i64) -> Result<Tensor> {
+        let ndim = self.shape.ndim() as i32;
+        let ax = if axis < 0 { ndim + axis } else { axis };
+        if ax < 0 || ax >= ndim {
+            return Err(MlxError::InvalidArgument(format!(
+                "narrow: axis {axis} out of range for ndim {ndim}"
+            )));
+        }
+        let ax_usize = ax as usize;
+        let dim_size = self.shape.0[ax_usize];
+        if start < 0 || start + length > dim_size {
+            return Err(MlxError::InvalidArgument(format!(
+                "narrow: start {start} + length {length} exceeds dim size {dim_size}"
+            )));
+        }
+        let mut new_dims = self.shape.0.clone();
+        new_dims[ax_usize] = length;
+        Ok(self.lazy_op(
+            OpKind::Narrow {
+                axis: ax,
+                start,
+                length,
+            },
+            SmallVec::from_slice(&[self.node_id]),
+            Shape::new(new_dims),
+            self.dtype,
+        ))
+    }
+
+    /// Concatenate tensors along an axis.
+    pub fn cat(tensors: &[&Tensor], axis: i32) -> Result<Tensor> {
+        if tensors.is_empty() {
+            return Err(MlxError::InvalidArgument(
+                "cat requires at least one tensor".into(),
+            ));
+        }
+        let first = tensors[0];
+        let ndim = first.shape.ndim() as i32;
+        let ax = if axis < 0 { ndim + axis } else { axis };
+        if ax < 0 || ax >= ndim {
+            return Err(MlxError::InvalidArgument(format!(
+                "cat: axis {axis} out of range for ndim {ndim}"
+            )));
+        }
+        let ax_usize = ax as usize;
+
+        // Validate shapes and compute output dim
+        let mut total_dim: i64 = 0;
+        for t in tensors {
+            if t.shape.ndim() != first.shape.ndim() {
+                return Err(MlxError::InvalidArgument(
+                    "cat: all tensors must have same ndim".into(),
+                ));
+            }
+            for (d, (&a, &b)) in first.shape.0.iter().zip(t.shape.0.iter()).enumerate() {
+                if d != ax_usize && a != b {
+                    return Err(MlxError::ShapeMismatch {
+                        expected: first.shape.0.clone(),
+                        got: t.shape.0.clone(),
+                    });
+                }
+            }
+            total_dim += t.shape.0[ax_usize];
+        }
+
+        let mut new_dims = first.shape.0.clone();
+        new_dims[ax_usize] = total_dim;
+
+        let inputs: SmallVec<[NodeId; 2]> = tensors.iter().map(|t| t.node_id).collect();
+
+        Ok(first.lazy_op(
+            OpKind::Concatenate { axis: ax },
+            inputs,
+            Shape::new(new_dims),
+            first.dtype,
+        ))
+    }
+
+    /// Single-head attention: Q @ K^T * scale → causal mask → softmax → @ V.
+    /// Q: [Tq, Dh], K: [Tk, Dh], V: [Tk, Dh] → Output: [Tq, Dh]
+    pub fn attention(&self, k: &Tensor, v: &Tensor, scale: f32, causal: bool) -> Result<Tensor> {
+        if self.shape.ndim() != 2 || k.shape.ndim() != 2 || v.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "attention requires 2D tensors [seq, head_dim]".into(),
+            ));
+        }
+        let tq = self.shape.0[0];
+        let dh = self.shape.0[1];
+        if k.shape.0[1] != dh || v.shape.0[1] != dh || k.shape.0[0] != v.shape.0[0] {
+            return Err(MlxError::ShapeMismatch {
+                expected: self.shape.0.clone(),
+                got: k.shape.0.clone(),
+            });
+        }
+        Ok(self.lazy_op(
+            OpKind::Attention { scale, causal },
+            SmallVec::from_slice(&[self.node_id, k.node_id, v.node_id]),
+            Shape::new(vec![tq, dh]),
+            self.dtype,
+        ))
+    }
+
     /// Element-wise square root.
     pub fn sqrt(&self) -> Tensor {
         self.lazy_op(

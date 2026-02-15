@@ -90,6 +90,13 @@ impl Backend for CpuRefBackend {
                 offset,
                 traditional,
             } => rope(inputs, *base, *offset, *traditional),
+            OpKind::Embedding => embedding(inputs),
+            OpKind::Narrow {
+                axis,
+                start,
+                length,
+            } => narrow(inputs, *axis, *start, *length),
+            OpKind::Concatenate { axis } => concatenate(inputs, *axis),
         }
     }
 }
@@ -781,6 +788,115 @@ fn cpu_attention(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<V
     let y = cpu_matmul_raw(&probs, v.data, tq, tk, dh);
 
     Ok(y)
+}
+
+fn embedding(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
+    let weight = require_input(inputs, 0)?;
+    let indices = require_input(inputs, 1)?;
+
+    if weight.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Embedding weight must be 2D [vocab_size, embed_dim]".into(),
+        ));
+    }
+    let vocab_size = weight.shape.0[0] as usize;
+    let embed_dim = weight.shape.0[1] as usize;
+    let seq_len = indices.data.len();
+
+    let mut result = Vec::with_capacity(seq_len * embed_dim);
+    for &idx_f in indices.data {
+        let idx = idx_f as usize;
+        if idx >= vocab_size {
+            return Err(MlxError::InvalidArgument(format!(
+                "Embedding index {idx} out of range for vocab_size {vocab_size}"
+            )));
+        }
+        let start = idx * embed_dim;
+        result.extend_from_slice(&weight.data[start..start + embed_dim]);
+    }
+    Ok(result)
+}
+
+fn narrow(inputs: &[NodeInput<'_>], axis: i32, start: i64, length: i64) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    let ndim = a.shape.ndim() as i32;
+    let ax = if axis < 0 { ndim + axis } else { axis };
+    if ax < 0 || ax >= ndim {
+        return Err(MlxError::InvalidArgument(format!(
+            "narrow: axis {axis} out of range for ndim {ndim}"
+        )));
+    }
+    let ax = ax as usize;
+    let dim_size = a.shape.0[ax] as i64;
+    if start < 0 || start + length > dim_size {
+        return Err(MlxError::InvalidArgument(format!(
+            "narrow: start {start} + length {length} exceeds dim size {dim_size}"
+        )));
+    }
+
+    let outer: usize = a.shape.0[..ax].iter().product::<i64>() as usize;
+    let dim: usize = a.shape.0[ax] as usize;
+    let inner: usize = a.shape.0[ax + 1..].iter().product::<i64>() as usize;
+    let start = start as usize;
+    let length = length as usize;
+
+    let mut result = Vec::with_capacity(outer * length * inner);
+    for o in 0..outer {
+        for d in start..start + length {
+            let base = (o * dim + d) * inner;
+            result.extend_from_slice(&a.data[base..base + inner]);
+        }
+    }
+    Ok(result)
+}
+
+fn concatenate(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
+    if inputs.is_empty() {
+        return Err(MlxError::InvalidArgument(
+            "Concatenate requires at least one input".into(),
+        ));
+    }
+    let first = &inputs[0];
+    let ndim = first.shape.ndim() as i32;
+    let ax = if axis < 0 { ndim + axis } else { axis };
+    if ax < 0 || ax >= ndim {
+        return Err(MlxError::InvalidArgument(format!(
+            "concatenate: axis {axis} out of range for ndim {ndim}"
+        )));
+    }
+    let ax = ax as usize;
+
+    // Validate all inputs have same shape except along concat axis
+    for inp in &inputs[1..] {
+        if inp.shape.ndim() != first.shape.ndim() {
+            return Err(MlxError::InvalidArgument(
+                "Concatenate: all inputs must have same ndim".into(),
+            ));
+        }
+        for (d, (&a, &b)) in first.shape.0.iter().zip(inp.shape.0.iter()).enumerate() {
+            if d != ax && a != b {
+                return Err(MlxError::ShapeMismatch {
+                    expected: first.shape.0.clone(),
+                    got: inp.shape.0.clone(),
+                });
+            }
+        }
+    }
+
+    let outer: usize = first.shape.0[..ax].iter().product::<i64>() as usize;
+    let inner: usize = first.shape.0[ax + 1..].iter().product::<i64>() as usize;
+
+    let total_dim: usize = inputs.iter().map(|i| i.shape.0[ax] as usize).sum();
+    let mut result = Vec::with_capacity(outer * total_dim * inner);
+
+    for o in 0..outer {
+        for inp in inputs {
+            let dim = inp.shape.0[ax] as usize;
+            let base = o * dim * inner;
+            result.extend_from_slice(&inp.data[base..base + dim * inner]);
+        }
+    }
+    Ok(result)
 }
 
 fn rope(inputs: &[NodeInput<'_>], base: f32, offset: usize, traditional: bool) -> Result<Vec<f32>> {

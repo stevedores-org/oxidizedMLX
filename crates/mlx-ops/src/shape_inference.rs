@@ -209,6 +209,71 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             Ok(Shape::new(vec![tq, dh]))
         }
 
+        // Embedding: [vocab, dim] + [seq_len] -> [seq_len, dim]
+        OpKind::Embedding => {
+            let weight = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing weight (input 0)".into()))?;
+            let indices = inputs
+                .get(1)
+                .ok_or(ShapeError::Mismatch("missing indices (input 1)".into()))?;
+            if weight.ndim() != 2 {
+                return Err(ShapeError::Mismatch(
+                    "Embedding weight must be 2D [vocab, dim]".into(),
+                ));
+            }
+            if indices.ndim() != 1 {
+                return Err(ShapeError::Mismatch(
+                    "Embedding indices must be 1D [seq_len]".into(),
+                ));
+            }
+            let seq_len = indices.0[0];
+            let dim = weight.0[1];
+            Ok(Shape::new(vec![seq_len, dim]))
+        }
+
+        // Narrow: slice along axis
+        OpKind::Narrow {
+            axis,
+            start: _,
+            length,
+        } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let resolved = resolve_axis(*axis, a.ndim())?;
+            let mut dims = a.0.clone();
+            dims[resolved] = *length;
+            Ok(Shape::new(dims))
+        }
+
+        // Concatenate: join along axis
+        OpKind::Concatenate { axis } => {
+            let first = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let resolved = resolve_axis(*axis, first.ndim())?;
+            let mut total_dim: i64 = 0;
+            for inp in inputs {
+                if inp.ndim() != first.ndim() {
+                    return Err(ShapeError::Mismatch(
+                        "Concatenate: all inputs must have same ndim".into(),
+                    ));
+                }
+                for (d, (&a, &b)) in first.0.iter().zip(inp.0.iter()).enumerate() {
+                    if d != resolved && a != b {
+                        return Err(ShapeError::Mismatch(format!(
+                            "Concatenate: mismatch at dim {d}: {a} vs {b}"
+                        )));
+                    }
+                }
+                total_dim += inp.0[resolved];
+            }
+            let mut dims = first.0.clone();
+            dims[resolved] = total_dim;
+            Ok(Shape::new(dims))
+        }
+
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
             let a = inputs

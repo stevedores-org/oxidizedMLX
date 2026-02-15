@@ -307,7 +307,10 @@ impl Backend for MlxFfiBackend {
             | OpKind::SoftmaxVjp { .. }
             | OpKind::SiluVjp
             | OpKind::GeluVjp
-            | OpKind::Sqrt => Err(MlxError::InvalidArgument(format!(
+            | OpKind::Sqrt
+            | OpKind::Embedding
+            | OpKind::Narrow { .. }
+            | OpKind::Concatenate { .. } => Err(MlxError::InvalidArgument(format!(
                 "{op:?} not supported by FFI backend",
             ))),
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(
