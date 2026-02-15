@@ -303,9 +303,11 @@ impl Backend for MlxFfiBackend {
             | OpKind::SoftmaxVjp { .. }
             | OpKind::SiluVjp
             | OpKind::GeluVjp
-            | OpKind::Sqrt => Err(MlxError::InvalidArgument(format!(
-                "{op:?} not supported by FFI backend",
-            ))),
+            | OpKind::Sqrt => {
+                Err(MlxError::InvalidArgument(format!(
+                    "{op:?} not supported by FFI backend",
+                )))
+            }
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(
                 "Constant/Parameter should be pre-materialized by Stream".into(),
             )),

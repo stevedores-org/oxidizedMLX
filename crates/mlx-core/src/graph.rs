@@ -326,42 +326,16 @@ enum OpKey {
     },
     Silu,
     Gelu,
-    LayerNorm {
-        eps_bits: u32,
-    },
-    RmsNorm {
-        eps_bits: u32,
-    },
-    Broadcast {
-        target_shape: Vec<i64>,
-    },
-    LayerNormVjp {
-        eps_bits: u32,
-    },
-    RmsNormVjp {
-        eps_bits: u32,
-    },
-    ScaledMaskedSoftmax {
-        scale_bits: u32,
-        causal: bool,
-    },
-    Attention {
-        scale_bits: u32,
-        causal: bool,
-    },
-    Rope {
-        rotary_dim: usize,
-        pos_offset: usize,
-        theta_bits: u32,
-    },
-    RoPE {
-        base_bits: u32,
-        offset: usize,
-        traditional: bool,
-    },
-    SoftmaxVjp {
-        axis: i32,
-    },
+    LayerNorm { eps_bits: u32 },
+    RmsNorm { eps_bits: u32 },
+    Broadcast { target_shape: Vec<i64> },
+    LayerNormVjp { eps_bits: u32 },
+    RmsNormVjp { eps_bits: u32 },
+    ScaledMaskedSoftmax { scale_bits: u32, causal: bool },
+    Attention { scale_bits: u32, causal: bool },
+    Rope { rotary_dim: usize, pos_offset: usize, theta_bits: u32 },
+    RoPE { base_bits: u32, offset: usize, traditional: bool },
+    SoftmaxVjp { axis: i32 },
     SiluVjp,
     GeluVjp,
     Sqrt,
@@ -411,20 +385,12 @@ impl OpKey {
                 scale_bits: scale.to_bits(),
                 causal: *causal,
             },
-            OpKind::Rope {
-                rotary_dim,
-                pos_offset,
-                theta,
-            } => OpKey::Rope {
+            OpKind::Rope { rotary_dim, pos_offset, theta } => OpKey::Rope {
                 rotary_dim: *rotary_dim,
                 pos_offset: *pos_offset,
                 theta_bits: theta.to_bits(),
             },
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
-            } => OpKey::RoPE {
+            OpKind::RoPE { base, offset, traditional } => OpKey::RoPE {
                 base_bits: base.to_bits(),
                 offset: *offset,
                 traditional: *traditional,

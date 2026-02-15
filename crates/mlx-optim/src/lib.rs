@@ -191,7 +191,8 @@ impl Optimizer for AdamW {
 
 /// Create a scalar tensor broadcast to the same shape/dtype/device as `like`.
 fn scalar_like(val: f32, like: &Tensor) -> Result<Tensor> {
-    Tensor::from_f32(&[val], &mlx_core::Shape::scalar(), like.device())?.broadcast_to(like.shape())
+    Tensor::from_f32(&[val], &mlx_core::Shape::scalar(), like.device())?
+        .broadcast_to(like.shape())
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use metal::{CommandQueue, Device};
 use std::sync::Arc;
 use tracing::info;
 
-use crate::command::{run_add_u32_impl, run_softmax_f32_impl};
+use crate::command::run_add_u32_impl;
 use crate::pipeline::PipelineCache;
 use crate::unified::{HostAllocation, UnifiedBuffer};
 use crate::{MetalError, Result};
@@ -12,15 +12,15 @@ use crate::{MetalError, Result};
 /// Shared Metal context: device + command queue.
 #[derive(Clone)]
 pub struct MetalContext {
-    device: metal::Device,
-    queue: metal::CommandQueue,
+    device: Device,
+    queue: CommandQueue,
     pipelines: Arc<PipelineCache>,
 }
 
 impl MetalContext {
     /// Create a new Metal context using the system default device.
     pub fn new() -> Result<Self> {
-        let device = metal::Device::system_default().ok_or(MetalError::NoDevice)?;
+        let device = Device::system_default().ok_or(MetalError::NoDevice)?;
         let queue = device.new_command_queue();
         info!(device = %device.name(), "Initialized Metal context");
         Ok(Self {
@@ -38,11 +38,6 @@ impl MetalContext {
     /// Run the trivial add_u32 kernel for smoke testing.
     pub fn run_add_u32(&self, a: &[u32], b: &[u32]) -> Result<Vec<u32>> {
         run_add_u32_impl(self, a, b)
-    }
-
-    /// Run the row-wise softmax kernel.
-    pub fn run_softmax_f32(&self, input: &[f32], row_size: usize) -> Result<Vec<f32>> {
-        run_softmax_f32_impl(self, input, row_size)
     }
 
     /// Create a zero-copy buffer from a page-aligned host allocation.
