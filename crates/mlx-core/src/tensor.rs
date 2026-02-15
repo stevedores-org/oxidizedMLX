@@ -1,6 +1,16 @@
 //! Tensor type — a lazy handle to a node in the computation graph.
+//!
+//! Operations on tensors record nodes in the graph. Actual computation is
+//! deferred until `eval()` (or `to_vec_f32()`) is called, at which point the
+//! stream topologically sorts the subgraph and dispatches to the backend.
 
-use crate::{DType, MlxError, Result, Shape};
+use std::sync::Arc;
+
+use smallvec::SmallVec;
+
+use crate::backend::{Stream, default_stream};
+use crate::graph::{OpKind, TensorMeta};
+use crate::{DType, MlxError, NodeId, Result, Shape};
 
 /// Compute device.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,40 +35,30 @@ impl Device {
 
 /// A tensor handle.
 ///
-/// In the lazy graph model, a `Tensor` is a lightweight reference to a node in
-/// the computation graph. Operations on tensors build up the graph; actual
-/// computation happens when `eval()` is called.
-///
-/// Currently this is a placeholder that stores data eagerly for the CPU-only
-/// path. The FFI backend path (feature `ffi`) will wrap opaque MLX handles.
+/// In the lazy graph model a `Tensor` is a lightweight reference to a node in
+/// the computation graph. Operations build up the graph; actual computation
+/// happens when `eval()` is called (or implicitly via `to_vec_f32()`).
 pub struct Tensor {
-    data: Vec<f32>,
+    node_id: NodeId,
     shape: Shape,
     dtype: DType,
     device: Device,
+    stream: Arc<Stream>,
 }
 
 impl Tensor {
+    // ── Constructors ────────────────────────────────────────────────────
+
     /// Create a tensor filled with zeros.
     pub fn zeros(shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
         let n = shape.numel() as usize;
-        Ok(Self {
-            data: vec![0.0; n],
-            shape: shape.clone(),
-            dtype,
-            device: device.clone(),
-        })
+        Self::from_data(vec![0.0; n], shape, dtype, device)
     }
 
     /// Create a tensor filled with ones.
     pub fn ones(shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
         let n = shape.numel() as usize;
-        Ok(Self {
-            data: vec![1.0; n],
-            shape: shape.clone(),
-            dtype,
-            device: device.clone(),
-        })
+        Self::from_data(vec![1.0; n], shape, dtype, device)
     }
 
     /// Create a tensor from f32 data.
@@ -72,13 +72,47 @@ impl Tensor {
                 expected,
             )));
         }
-        Ok(Self {
-            data: data.to_vec(),
+        Self::from_data(data.to_vec(), shape, DType::F32, device)
+    }
+
+    fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
+        let stream = default_stream();
+        let meta = TensorMeta {
             shape: shape.clone(),
-            dtype: DType::F32,
+            dtype,
+        };
+        let node_id = stream.add_constant(data, meta);
+        Ok(Self {
+            node_id,
+            shape: shape.clone(),
+            dtype,
             device: device.clone(),
+            stream,
         })
     }
+
+    fn lazy_op(
+        &self,
+        op: OpKind,
+        inputs: SmallVec<[NodeId; 2]>,
+        shape: Shape,
+        dtype: DType,
+    ) -> Self {
+        let meta = TensorMeta {
+            shape: shape.clone(),
+            dtype,
+        };
+        let node_id = self.stream.add_op(op, inputs, meta);
+        Tensor {
+            node_id,
+            shape,
+            dtype,
+            device: self.device.clone(),
+            stream: Arc::clone(&self.stream),
+        }
+    }
+
+    // ── Elementwise ops ─────────────────────────────────────────────────
 
     /// Element-wise addition.
     pub fn add(&self, rhs: &Tensor) -> Result<Tensor> {
@@ -88,18 +122,28 @@ impl Tensor {
                 got: rhs.shape.0.clone(),
             });
         }
-        let data: Vec<f32> = self
-            .data
-            .iter()
-            .zip(rhs.data.iter())
-            .map(|(a, b)| a + b)
-            .collect();
-        Ok(Tensor {
-            data,
-            shape: self.shape.clone(),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+        Ok(self.lazy_op(
+            OpKind::Add,
+            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        ))
+    }
+
+    /// Element-wise subtraction.
+    pub fn sub(&self, rhs: &Tensor) -> Result<Tensor> {
+        if self.shape != rhs.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: self.shape.0.clone(),
+                got: rhs.shape.0.clone(),
+            });
+        }
+        Ok(self.lazy_op(
+            OpKind::Sub,
+            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        ))
     }
 
     /// Element-wise multiplication.
@@ -110,54 +154,41 @@ impl Tensor {
                 got: rhs.shape.0.clone(),
             });
         }
-        let data: Vec<f32> = self
-            .data
-            .iter()
-            .zip(rhs.data.iter())
-            .map(|(a, b)| a * b)
-            .collect();
-        Ok(Tensor {
-            data,
-            shape: self.shape.clone(),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+        Ok(self.lazy_op(
+            OpKind::Mul,
+            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        ))
     }
 
-    /// Matrix multiplication (2D only for now).
-    pub fn matmul(&self, rhs: &Tensor) -> Result<Tensor> {
-        if self.shape.ndim() != 2 || rhs.shape.ndim() != 2 {
-            return Err(MlxError::InvalidArgument(
-                "matmul requires 2D tensors".to_string(),
-            ));
-        }
-        let m = self.shape.0[0] as usize;
-        let k = self.shape.0[1] as usize;
-        let k2 = rhs.shape.0[0] as usize;
-        let n = rhs.shape.0[1] as usize;
-        if k != k2 {
+    /// Element-wise division.
+    pub fn div(&self, rhs: &Tensor) -> Result<Tensor> {
+        if self.shape != rhs.shape {
             return Err(MlxError::ShapeMismatch {
-                expected: vec![m as i64, k as i64],
-                got: vec![k2 as i64, n as i64],
+                expected: self.shape.0.clone(),
+                got: rhs.shape.0.clone(),
             });
         }
-        let mut data = vec![0.0f32; m * n];
-        for i in 0..m {
-            for j in 0..n {
-                let mut sum = 0.0f32;
-                for p in 0..k {
-                    sum += self.data[i * k + p] * rhs.data[p * n + j];
-                }
-                data[i * n + j] = sum;
-            }
-        }
-        Ok(Tensor {
-            data,
-            shape: Shape::new(vec![m as i64, n as i64]),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+        Ok(self.lazy_op(
+            OpKind::Div,
+            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        ))
     }
+
+    /// Element-wise negation.
+    pub fn neg(&self) -> Tensor {
+        self.lazy_op(
+            OpKind::Neg,
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
+    }
+
+    // ── Reductions ──────────────────────────────────────────────────────
 
     /// Sum along an axis.
     pub fn sum_axis(&self, axis: i32) -> Result<Tensor> {
@@ -168,46 +199,99 @@ impl Tensor {
                 "axis {axis} out of range for ndim {ndim}"
             )));
         }
-        let ax = ax as usize;
-
-        let mut new_shape: Vec<i64> = self.shape.0.clone();
-        new_shape.remove(ax);
-        if new_shape.is_empty() {
-            new_shape.push(1);
+        let mut new_dims: Vec<i64> = self.shape.0.clone();
+        new_dims.remove(ax as usize);
+        if new_dims.is_empty() {
+            new_dims.push(1);
         }
-
-        let outer: usize = self.shape.0[..ax].iter().product::<i64>() as usize;
-        let dim: usize = self.shape.0[ax] as usize;
-        let inner: usize = self.shape.0[ax + 1..].iter().product::<i64>() as usize;
-        let inner = if inner == 0 { 1 } else { inner };
-
-        let mut data = vec![0.0f32; outer * inner];
-        for o in 0..outer {
-            for d in 0..dim {
-                for i in 0..inner {
-                    data[o * inner + i] += self.data[o * dim * inner + d * inner + i];
-                }
-            }
-        }
-
-        Ok(Tensor {
-            data,
-            shape: Shape::new(new_shape),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+        Ok(self.lazy_op(
+            OpKind::Sum { axis: Some(axis) },
+            SmallVec::from_slice(&[self.node_id]),
+            Shape::new(new_dims),
+            self.dtype,
+        ))
     }
 
     /// Sum all elements to a scalar.
     pub fn sum_all(&self) -> Result<Tensor> {
-        let sum: f32 = self.data.iter().sum();
-        Ok(Tensor {
-            data: vec![sum],
-            shape: Shape::new(vec![1]),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+        Ok(self.lazy_op(
+            OpKind::Sum { axis: None },
+            SmallVec::from_slice(&[self.node_id]),
+            Shape::new(vec![1]),
+            self.dtype,
+        ))
     }
+
+    // ── Linear algebra ──────────────────────────────────────────────────
+
+    /// Matrix multiplication (2D only for now).
+    pub fn matmul(&self, rhs: &Tensor) -> Result<Tensor> {
+        if self.shape.ndim() != 2 || rhs.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "matmul requires 2D tensors".to_string(),
+            ));
+        }
+        let m = self.shape.0[0];
+        let k = self.shape.0[1];
+        let k2 = rhs.shape.0[0];
+        let n = rhs.shape.0[1];
+        if k != k2 {
+            return Err(MlxError::ShapeMismatch {
+                expected: self.shape.0.clone(),
+                got: rhs.shape.0.clone(),
+            });
+        }
+        Ok(self.lazy_op(
+            OpKind::MatMul,
+            SmallVec::from_slice(&[self.node_id, rhs.node_id]),
+            Shape::new(vec![m, n]),
+            self.dtype,
+        ))
+    }
+
+    // ── Shape manipulation ──────────────────────────────────────────────
+
+    /// Reshape the tensor.
+    pub fn reshape(&self, new_shape: &Shape) -> Result<Tensor> {
+        if self.shape.numel() != new_shape.numel() {
+            return Err(MlxError::ShapeMismatch {
+                expected: self.shape.0.clone(),
+                got: new_shape.0.clone(),
+            });
+        }
+        Ok(self.lazy_op(
+            OpKind::Reshape {
+                new_shape: new_shape.clone(),
+            },
+            SmallVec::from_slice(&[self.node_id]),
+            new_shape.clone(),
+            self.dtype,
+        ))
+    }
+
+    /// Transpose (reverses axes by default, or use specified permutation).
+    pub fn transpose(&self, axes: Option<&[usize]>) -> Result<Tensor> {
+        let perm: Vec<usize> = match axes {
+            Some(ax) => {
+                if ax.len() != self.shape.ndim() {
+                    return Err(MlxError::InvalidArgument(
+                        "transpose axes length must match ndim".into(),
+                    ));
+                }
+                ax.to_vec()
+            }
+            None => (0..self.shape.ndim()).rev().collect(),
+        };
+        let new_dims: Vec<i64> = perm.iter().map(|&ax| self.shape.0[ax]).collect();
+        Ok(self.lazy_op(
+            OpKind::Transpose { axes: Some(perm) },
+            SmallVec::from_slice(&[self.node_id]),
+            Shape::new(new_dims),
+            self.dtype,
+        ))
+    }
+
+    // ── Activations ─────────────────────────────────────────────────────
 
     /// Softmax along an axis.
     pub fn softmax(&self, axis: i32) -> Result<Tensor> {
@@ -218,73 +302,72 @@ impl Tensor {
                 "axis {axis} out of range for ndim {ndim}"
             )));
         }
-        let ax = ax as usize;
-
-        let outer: usize = self.shape.0[..ax].iter().product::<i64>() as usize;
-        let dim: usize = self.shape.0[ax] as usize;
-        let inner: usize = self.shape.0[ax + 1..].iter().product::<i64>() as usize;
-        let inner = if inner == 0 { 1 } else { inner };
-
-        let mut data = self.data.clone();
-
-        for o in 0..outer {
-            for i in 0..inner {
-                // Numerically stable softmax: subtract max first
-                let mut max_val = f32::NEG_INFINITY;
-                for d in 0..dim {
-                    let idx = o * dim * inner + d * inner + i;
-                    if data[idx] > max_val {
-                        max_val = data[idx];
-                    }
-                }
-                let mut sum_exp = 0.0f32;
-                for d in 0..dim {
-                    let idx = o * dim * inner + d * inner + i;
-                    data[idx] = (data[idx] - max_val).exp();
-                    sum_exp += data[idx];
-                }
-                for d in 0..dim {
-                    let idx = o * dim * inner + d * inner + i;
-                    data[idx] /= sum_exp;
-                }
-            }
-        }
-
-        Ok(Tensor {
-            data,
-            shape: self.shape.clone(),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+        Ok(self.lazy_op(
+            OpKind::Softmax { axis },
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        ))
     }
 
-    /// Reshape the tensor.
-    pub fn reshape(&self, new_shape: &Shape) -> Result<Tensor> {
-        if self.shape.numel() != new_shape.numel() {
-            return Err(MlxError::ShapeMismatch {
-                expected: self.shape.0.clone(),
-                got: new_shape.0.clone(),
-            });
-        }
-        Ok(Tensor {
-            data: self.data.clone(),
-            shape: new_shape.clone(),
-            dtype: self.dtype,
-            device: self.device.clone(),
-        })
+    /// SiLU (Sigmoid Linear Unit) activation.
+    pub fn silu(&self) -> Tensor {
+        self.lazy_op(
+            OpKind::Silu,
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
     }
 
-    /// Materialize the tensor (no-op for eager CPU path).
-    pub fn eval(&self) {
-        // In the lazy graph model, this would trigger computation.
-        // For the eager CPU path, data is already materialized.
+    /// GELU (Gaussian Error Linear Unit) activation.
+    pub fn gelu(&self) -> Tensor {
+        self.lazy_op(
+            OpKind::Gelu,
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
     }
 
-    /// Copy data out as Vec<f32>.
+    // ── Normalization ───────────────────────────────────────────────────
+
+    /// Layer normalization over the last dimension.
+    pub fn layer_norm(&self, eps: f32) -> Tensor {
+        self.lazy_op(
+            OpKind::LayerNorm { eps },
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
+    }
+
+    /// RMS normalization over the last dimension.
+    pub fn rms_norm(&self, eps: f32) -> Tensor {
+        self.lazy_op(
+            OpKind::RmsNorm { eps },
+            SmallVec::from_slice(&[self.node_id]),
+            self.shape.clone(),
+            self.dtype,
+        )
+    }
+
+    // ── Materialization ─────────────────────────────────────────────────
+
+    /// Materialize the tensor — triggers evaluation of the computation graph.
+    pub fn eval(&self) -> Result<()> {
+        self.stream.eval(self.node_id)
+    }
+
+    /// Copy data out as Vec<f32>. Triggers evaluation if needed.
     pub fn to_vec_f32(&self) -> Result<Vec<f32>> {
-        self.eval();
-        Ok(self.data.clone())
+        self.eval()?;
+        self.stream
+            .get_buffer(self.node_id)
+            .ok_or_else(|| MlxError::InvalidArgument("buffer not found after eval".into()))
     }
+
+    // ── Accessors ───────────────────────────────────────────────────────
 
     /// Get the tensor shape.
     pub fn shape(&self) -> &Shape {
@@ -305,6 +388,11 @@ impl Tensor {
     pub fn numel(&self) -> i64 {
         self.shape.numel()
     }
+
+    /// Get the graph node ID.
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
 }
 
 impl std::ops::Add for &Tensor {
@@ -314,10 +402,24 @@ impl std::ops::Add for &Tensor {
     }
 }
 
+impl std::ops::Sub for &Tensor {
+    type Output = Result<Tensor>;
+    fn sub(self, rhs: &Tensor) -> Self::Output {
+        Tensor::sub(self, rhs)
+    }
+}
+
 impl std::ops::Mul for &Tensor {
     type Output = Result<Tensor>;
     fn mul(self, rhs: &Tensor) -> Self::Output {
         Tensor::mul(self, rhs)
+    }
+}
+
+impl std::ops::Neg for &Tensor {
+    type Output = Tensor;
+    fn neg(self) -> Self::Output {
+        Tensor::neg(self)
     }
 }
 
@@ -363,6 +465,14 @@ mod tests {
     }
 
     #[test]
+    fn test_sub() {
+        let a = Tensor::from_f32(&[5.0, 7.0, 9.0], &Shape::new(vec![3]), &cpu()).unwrap();
+        let b = Tensor::from_f32(&[1.0, 2.0, 3.0], &Shape::new(vec![3]), &cpu()).unwrap();
+        let c = a.sub(&b).unwrap();
+        assert_eq!(c.to_vec_f32().unwrap(), vec![4.0, 5.0, 6.0]);
+    }
+
+    #[test]
     fn test_mul() {
         let a = Tensor::from_f32(&[2.0, 3.0], &Shape::new(vec![2]), &cpu()).unwrap();
         let b = Tensor::from_f32(&[4.0, 5.0], &Shape::new(vec![2]), &cpu()).unwrap();
@@ -371,11 +481,25 @@ mod tests {
     }
 
     #[test]
+    fn test_div() {
+        let a = Tensor::from_f32(&[10.0, 9.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let b = Tensor::from_f32(&[2.0, 3.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let c = a.div(&b).unwrap();
+        assert_eq!(c.to_vec_f32().unwrap(), vec![5.0, 3.0]);
+    }
+
+    #[test]
+    fn test_neg() {
+        let a = Tensor::from_f32(&[1.0, -2.0, 3.0], &Shape::new(vec![3]), &cpu()).unwrap();
+        let b = a.neg();
+        assert_eq!(b.to_vec_f32().unwrap(), vec![-1.0, 2.0, -3.0]);
+    }
+
+    #[test]
     fn test_matmul() {
         let a = Tensor::from_f32(&[1.0, 2.0, 3.0, 4.0], &Shape::new(vec![2, 2]), &cpu()).unwrap();
         let b = Tensor::from_f32(&[5.0, 6.0, 7.0, 8.0], &Shape::new(vec![2, 2]), &cpu()).unwrap();
         let c = a.matmul(&b).unwrap();
-        // [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]] = [[19,22],[43,50]]
         assert_eq!(c.to_vec_f32().unwrap(), vec![19.0, 22.0, 43.0, 50.0]);
     }
 
@@ -387,12 +511,17 @@ mod tests {
             &cpu(),
         )
         .unwrap();
-        // sum axis=0 -> [5, 7, 9]
         let s0 = a.sum_axis(0).unwrap();
         assert_eq!(s0.to_vec_f32().unwrap(), vec![5.0, 7.0, 9.0]);
-        // sum axis=1 -> [6, 15]
         let s1 = a.sum_axis(1).unwrap();
         assert_eq!(s1.to_vec_f32().unwrap(), vec![6.0, 15.0]);
+    }
+
+    #[test]
+    fn test_sum_all() {
+        let a = Tensor::from_f32(&[1.0, 2.0, 3.0], &Shape::new(vec![3]), &cpu()).unwrap();
+        let s = a.sum_all().unwrap();
+        assert_eq!(s.to_vec_f32().unwrap(), vec![6.0]);
     }
 
     #[test]
@@ -402,7 +531,6 @@ mod tests {
         let vals = s.to_vec_f32().unwrap();
         let sum: f32 = vals.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
-        // softmax is monotonic
         assert!(vals[0] < vals[1]);
         assert!(vals[1] < vals[2]);
     }
@@ -421,10 +549,60 @@ mod tests {
     }
 
     #[test]
+    fn test_transpose() {
+        let a = Tensor::from_f32(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            &Shape::new(vec![2, 3]),
+            &cpu(),
+        )
+        .unwrap();
+        let b = a.transpose(None).unwrap();
+        assert_eq!(b.shape(), &Shape::new(vec![3, 2]));
+        // [[1,2,3],[4,5,6]] transposed = [[1,4],[2,5],[3,6]]
+        assert_eq!(b.to_vec_f32().unwrap(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
     fn test_operator_add() {
         let a = Tensor::from_f32(&[1.0, 2.0], &Shape::new(vec![2]), &cpu()).unwrap();
         let b = Tensor::from_f32(&[3.0, 4.0], &Shape::new(vec![2]), &cpu()).unwrap();
         let c = (&a + &b).unwrap();
         assert_eq!(c.to_vec_f32().unwrap(), vec![4.0, 6.0]);
+    }
+
+    #[test]
+    fn test_operator_neg() {
+        let a = Tensor::from_f32(&[1.0, -2.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let b = -&a;
+        assert_eq!(b.to_vec_f32().unwrap(), vec![-1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_lazy_chain() {
+        // Build a chain: (a + b) * c — nothing evaluated until to_vec_f32
+        let a = Tensor::from_f32(&[1.0, 2.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let b = Tensor::from_f32(&[3.0, 4.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let c = Tensor::from_f32(&[2.0, 3.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let d = a.add(&b).unwrap().mul(&c).unwrap();
+        // Only now does evaluation happen:
+        assert_eq!(d.to_vec_f32().unwrap(), vec![8.0, 18.0]);
+    }
+
+    #[test]
+    fn test_silu() {
+        let a = Tensor::from_f32(&[0.0, 1.0], &Shape::new(vec![2]), &cpu()).unwrap();
+        let b = a.silu();
+        let vals = b.to_vec_f32().unwrap();
+        assert!((vals[0]).abs() < 1e-6);
+        assert!((vals[1] - 0.7311).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_layer_norm() {
+        let a = Tensor::from_f32(&[1.0, 2.0, 3.0], &Shape::new(vec![3]), &cpu()).unwrap();
+        let b = a.layer_norm(1e-5);
+        let vals = b.to_vec_f32().unwrap();
+        let mean: f32 = vals.iter().sum::<f32>() / 3.0;
+        assert!(mean.abs() < 1e-5);
     }
 }
