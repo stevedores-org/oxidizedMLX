@@ -6,10 +6,5 @@ license.workspace = true
 description = "Safe Rust API for MLX tensors, devices, and core operations"
 
 [dependencies]
-mlx-sys = { path = "../mlx-sys", optional = true }
 thiserror.workspace = true
 smallvec.workspace = true
-
-[features]
-default = []
-ffi = ["dep:mlx-sys"]

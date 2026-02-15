@@ -420,7 +420,6 @@ dependencies = [
 name = "mlx-core"
 version = "0.1.0"
 dependencies = [
- "mlx-sys",
  "smallvec",
  "thiserror",
 ]
@@ -487,6 +486,8 @@ dependencies = [
  "bindgen",
  "cmake",
  "libc",
+ "mlx-conformance",
+ "mlx-core",
 ]
 
 [[package]]
