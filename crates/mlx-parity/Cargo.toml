@@ -1,0 +1,15 @@
+[package]
+name = "mlx-parity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parity tests: Metal GPU backend vs CPU reference backend"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+mlx-cpu = { path = "../mlx-cpu" }
+mlx-metal = { path = "../mlx-metal" }
+mlx-conformance = { path = "../mlx-conformance" }
+smallvec.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true

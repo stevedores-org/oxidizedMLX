@@ -49,6 +49,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --exclude mlx-sys
 
+  parity-macos:
+    name: Parity (Metal vs CPU)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p mlx-parity
+
   valgrind:
     name: Valgrind (C ABI Lifecycle)
     runs-on: ubuntu-latest

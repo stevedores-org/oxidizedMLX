@@ -8,3 +8,7 @@ description = "Safe Rust API for MLX tensors, devices, and core operations"
 [dependencies]
 thiserror.workspace = true
 smallvec.workspace = true
+
+[features]
+default-backend-metal = []
+default-backend-cpu = []

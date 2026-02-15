@@ -171,7 +171,41 @@ impl std::fmt::Debug for Stream {
     }
 }
 
-/// The default stream using the built-in CPU reference backend.
+/// Which backend to use by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultBackend {
+    Cpu,
+    Metal,
+}
+
+/// Determine the default backend via env var → compile-time feature → CPU fallback.
+///
+/// Priority:
+/// 1. `MLX_RS_BACKEND` env var (`"cpu"` or `"metal"`, case-insensitive)
+/// 2. Cargo feature `default-backend-metal`
+/// 3. Cargo feature `default-backend-cpu`
+/// 4. CPU fallback
+pub fn default_backend() -> DefaultBackend {
+    if let Ok(val) = std::env::var("MLX_RS_BACKEND") {
+        match val.to_lowercase().as_str() {
+            "metal" => return DefaultBackend::Metal,
+            "cpu" => return DefaultBackend::Cpu,
+            _ => {} // ignore unrecognized values, fall through
+        }
+    }
+
+    if cfg!(feature = "default-backend-metal") {
+        DefaultBackend::Metal
+    } else {
+        DefaultBackend::Cpu
+    }
+}
+
+/// The default stream using the CPU reference backend.
+///
+/// When `default_backend()` returns `Metal`, higher-level crates (e.g. `mlx-cpu`,
+/// `mlx-metal`) are responsible for constructing the appropriate stream.
+/// This static always provides a working CPU fallback.
 static DEFAULT_STREAM: LazyLock<Arc<Stream>> =
     LazyLock::new(|| Arc::new(Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))));
 
