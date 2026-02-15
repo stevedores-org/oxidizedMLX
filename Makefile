@@ -52,10 +52,10 @@ test-cpu:
 # Requires an MLX source checkout providing the C ABI shim (see crates/mlx-sys/build.rs)
 
 test-ffi:
-	cargo test --workspace
+	cargo test -p mlx-sys --features ffi
 
 clippy-ffi:
-	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy -p mlx-sys --features ffi --all-targets -- -D warnings
 
 conformance:
 	cargo test -p mlx-conformance
