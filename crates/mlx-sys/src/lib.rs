@@ -162,8 +162,8 @@ mod tests {
             #[cfg(target_os = "macos")]
             assert_eq!(
                 dt,
-                mlx_device_type_t::GPU,
-                "Apple Silicon should default to GPU"
+                mlx_device_type_t::CPU,
+                "Apple Silicon should default to CPU until Metal is enabled"
             );
             #[cfg(not(target_os = "macos"))]
             assert_eq!(

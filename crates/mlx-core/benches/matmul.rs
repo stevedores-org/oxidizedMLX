@@ -1,22 +1,18 @@
-// GEMM benchmarks — requires Metal backend with `metal_stream()` API.
-
-#[cfg(target_os = "macos")]
-use criterion::{BatchSize, BenchmarkId, Throughput};
-use criterion::{Criterion, criterion_group, criterion_main};
-#[cfg(target_os = "macos")]
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use mlx_core::backend::Stream;
+use mlx_core::cpu_kernels::CpuRefBackend;
 use mlx_core::graph::{OpKind, TensorMeta};
-#[cfg(target_os = "macos")]
 use mlx_core::types::{DType, Shape};
+use smallvec::SmallVec;
 
-#[cfg(target_os = "macos")]
-fn bench_gemm(c: &mut Criterion) {
+fn bench_matmul(c: &mut Criterion) {
     let shapes: &[(usize, usize, usize, &str)] = &[
-        (1, 4096, 4096, "decode_1x4096x4096"),
-        (128, 4096, 4096, "prefill_128x4096x4096"),
-        (256, 4096, 11008, "ffn_256x4096x11008"),
+        (1, 256, 256, "decode_1x256x256"),
+        (32, 256, 256, "prefill_32x256x256"),
+        (64, 512, 512, "mid_64x512x512"),
     ];
 
-    let mut group = c.benchmark_group("metal_gemm_f32");
+    let mut group = c.benchmark_group("cpu_matmul_f32");
 
     for &(m, k, n, name) in shapes {
         let flops = 2 * m * k * n;
@@ -28,7 +24,7 @@ fn bench_gemm(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("matmul", name), |bench| {
             bench.iter_batched(
                 || {
-                    let stream = mlx_metal::metal_stream().expect("Metal should be available");
+                    let stream = Stream::new(Box::new(CpuRefBackend));
                     let a = stream.add_constant(
                         a_data.clone(),
                         TensorMeta {
@@ -48,7 +44,7 @@ fn bench_gemm(c: &mut Criterion) {
                 |(stream, a, b)| {
                     let c = stream.add_op(
                         OpKind::MatMul,
-                        smallvec::SmallVec::from_slice(&[a, b]),
+                        SmallVec::from_slice(&[a, b]),
                         TensorMeta {
                             shape: Shape::new(vec![m as i64, n as i64]),
                             dtype: DType::F32,
@@ -64,8 +60,5 @@ fn bench_gemm(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(not(target_os = "macos"))]
-fn bench_gemm(_c: &mut Criterion) {}
-
-criterion_group!(benches, bench_gemm);
+criterion_group!(benches, bench_matmul);
 criterion_main!(benches);

@@ -281,6 +281,9 @@ impl Backend for MlxFfiBackend {
                 self.free_tensor(h);
                 Ok(result)
             }
+            OpKind::Exp | OpKind::Log => Err(MlxError::InvalidArgument(format!(
+                "{op:?} not supported by FFI backend",
+            ))),
             OpKind::Silu => Err(MlxError::InvalidArgument(
                 "Silu not supported by FFI backend".into(),
             )),
@@ -292,6 +295,9 @@ impl Backend for MlxFfiBackend {
             )),
             OpKind::RmsNorm { .. } => Err(MlxError::InvalidArgument(
                 "RmsNorm not supported by FFI backend".into(),
+            )),
+            OpKind::Rope { .. } => Err(MlxError::InvalidArgument(
+                "Rope not supported by FFI backend".into(),
             )),
             OpKind::Broadcast { .. } | OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
                 Err(MlxError::InvalidArgument(format!(
