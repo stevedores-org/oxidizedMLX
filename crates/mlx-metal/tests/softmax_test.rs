@@ -8,16 +8,13 @@ mod tests {
         let ctx = MetalContext::new().expect("context");
 
         // Input: 2 rows of 4 elements
-        let input: Vec<f32> = vec![
-            1.0, 2.0, 3.0, 4.0,
-            0.0, 0.0, 0.0, 0.0,
-        ];
+        let input: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0];
         let row_size = 4;
-        
+
         let out = ctx.run_softmax_f32(&input, row_size).expect("run softmax");
-        
+
         assert_eq!(out.len(), 8);
-        
+
         // Row 1: softmax([1, 2, 3, 4])
         let row1 = &out[0..4];
         let sum1: f32 = row1.iter().sum();

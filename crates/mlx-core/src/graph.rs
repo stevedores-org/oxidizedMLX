@@ -99,6 +99,22 @@ pub enum OpKind {
         target_shape: Shape,
     },
 
+    // ── Attention ──────────────────────────────────────────────────
+    /// Fused scale + causal-mask + softmax along last axis.
+    /// Input: scores [Tq, Tk], output: probs [Tq, Tk]
+    ScaledMaskedSoftmax {
+        scale: f32,
+        causal: bool,
+    },
+
+    /// Full single-head attention composition.
+    /// Inputs: [Q, K, V] where Q=[Tq,Dh], K=[Tk,Dh], V=[Tk,Dh]
+    /// Output: Y=[Tq,Dh]
+    Attention {
+        scale: f32,
+        causal: bool,
+    },
+
     // ── Backward (VJP) ops ──────────────────────────────────────────
     /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
     LayerNormVjp {
@@ -107,6 +123,26 @@ pub enum OpKind {
     /// RmsNorm backward: inputs = [grad_output, input], produces grad_input.
     RmsNormVjp {
         eps: f32,
+    },
+    /// Softmax backward: inputs = [grad_output, softmax_output], produces grad_input.
+    SoftmaxVjp {
+        axis: i32,
+    },
+    /// SiLU backward: inputs = [grad_output, original_input], produces grad_input.
+    SiluVjp,
+    /// GELU backward: inputs = [grad_output, original_input], produces grad_input.
+    GeluVjp,
+
+    // ── Elementwise (misc) ──────────────────────────────────────────
+    /// Element-wise square root.
+    Sqrt,
+
+    // ── Rotary Positional Embeddings ───────────────────────────────────
+    #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
+    RoPE {
+        base: f32,
+        offset: usize,
+        traditional: bool,
     },
 }
 
@@ -273,25 +309,66 @@ enum OpKey {
     Neg,
     Exp,
     Log,
-    Sum { axis: Option<i32> },
-    Mean { axis: Option<i32> },
-    Max { axis: Option<i32> },
+    Sum {
+        axis: Option<i32>,
+    },
+    Mean {
+        axis: Option<i32>,
+    },
+    Max {
+        axis: Option<i32>,
+    },
     MatMul,
-    Reshape { new_shape: Vec<i64> },
-    Transpose { axes: Option<Vec<usize>> },
-    Softmax { axis: i32 },
+    Reshape {
+        new_shape: Vec<i64>,
+    },
+    Transpose {
+        axes: Option<Vec<usize>>,
+    },
+    Softmax {
+        axis: i32,
+    },
     Silu,
     Gelu,
-    LayerNorm { eps_bits: u32 },
-    RmsNorm { eps_bits: u32 },
-    Broadcast { target_shape: Vec<i64> },
-    LayerNormVjp { eps_bits: u32 },
-    RmsNormVjp { eps_bits: u32 },
+    LayerNorm {
+        eps_bits: u32,
+    },
+    RmsNorm {
+        eps_bits: u32,
+    },
+    Broadcast {
+        target_shape: Vec<i64>,
+    },
+    LayerNormVjp {
+        eps_bits: u32,
+    },
+    RmsNormVjp {
+        eps_bits: u32,
+    },
+    ScaledMaskedSoftmax {
+        scale_bits: u32,
+        causal: bool,
+    },
+    Attention {
+        scale_bits: u32,
+        causal: bool,
+    },
     Rope {
         rotary_dim: usize,
         pos_offset: usize,
         theta_bits: u32,
     },
+    RoPE {
+        base_bits: u32,
+        offset: usize,
+        traditional: bool,
+    },
+    SoftmaxVjp {
+        axis: i32,
+    },
+    SiluVjp,
+    GeluVjp,
+    Sqrt,
 }
 
 impl OpKey {
@@ -332,6 +409,14 @@ impl OpKey {
             OpKind::RmsNormVjp { eps } => OpKey::RmsNormVjp {
                 eps_bits: eps.to_bits(),
             },
+            OpKind::ScaledMaskedSoftmax { scale, causal } => OpKey::ScaledMaskedSoftmax {
+                scale_bits: scale.to_bits(),
+                causal: *causal,
+            },
+            OpKind::Attention { scale, causal } => OpKey::Attention {
+                scale_bits: scale.to_bits(),
+                causal: *causal,
+            },
             OpKind::Rope {
                 rotary_dim,
                 pos_offset,
@@ -341,6 +426,19 @@ impl OpKey {
                 pos_offset: *pos_offset,
                 theta_bits: theta.to_bits(),
             },
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            } => OpKey::RoPE {
+                base_bits: base.to_bits(),
+                offset: *offset,
+                traditional: *traditional,
+            },
+            OpKind::SoftmaxVjp { axis } => OpKey::SoftmaxVjp { axis: *axis },
+            OpKind::SiluVjp => OpKey::SiluVjp,
+            OpKind::GeluVjp => OpKey::GeluVjp,
+            OpKind::Sqrt => OpKey::Sqrt,
         }
     }
 }
@@ -354,7 +452,10 @@ struct CseKey {
 }
 
 fn is_cse_eligible(op: &OpKind) -> bool {
-    !matches!(op, OpKind::Parameter)
+    // Constants and Parameters must never be deduplicated: two tensors with
+    // identical data may flow through different parts of the graph and receive
+    // independent gradients during backpropagation.
+    !matches!(op, OpKind::Constant | OpKind::Parameter)
 }
 
 pub fn hash_f32_payload(data: &[f32]) -> u64 {
@@ -415,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cse_dedups_constants_and_ops() {
+    fn test_cse_does_not_dedup_constants() {
         let mut g = Graph::new();
         let meta = TensorMeta {
             shape: Shape::new(vec![2]),
@@ -433,8 +534,20 @@ mod tests {
             meta.clone(),
             Some(&[1.0, 2.0]),
         );
-        assert_eq!(a, b);
-        assert_eq!(g.len(), 1);
+        // Constants must NOT be deduplicated — they may receive independent gradients
+        assert_ne!(a, b);
+        assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn test_cse_dedups_ops() {
+        let mut g = Graph::new();
+        let meta = TensorMeta {
+            shape: Shape::new(vec![2]),
+            dtype: DType::F32,
+        };
+        let a = g.add_node_raw(OpKind::Constant, SmallVec::new(), meta.clone());
+        let b = g.add_node_raw(OpKind::Constant, SmallVec::new(), meta.clone());
 
         let add1 = g.intern_node(
             OpKind::Add,
@@ -449,6 +562,6 @@ mod tests {
             None,
         );
         assert_eq!(add1, add2);
-        assert_eq!(g.len(), 2);
+        assert_eq!(g.len(), 3); // 2 constants + 1 add
     }
 }
