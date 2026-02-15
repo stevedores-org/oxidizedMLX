@@ -57,11 +57,18 @@ fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
     let mut grads: HashMap<NodeId, Tensor> = HashMap::new();
     grads.insert(loss.node_id(), seed);
 
+    let mut target_grad = None;
+
     for &node_id in order.iter().rev() {
         let grad_output = match grads.remove(&node_id) {
             Some(g) => g,
             None => continue,
         };
+
+        // Capture gradient w.r.t the target input if we found it
+        if node_id == wrt.node_id() {
+            target_grad = Some(grad_output.clone());
+        }
 
         let node = match stream.get_node(node_id) {
             Some(n) => n,
@@ -101,7 +108,7 @@ fn backward(loss: &Tensor, wrt: &Tensor, seed: Tensor) -> Result<Tensor> {
         }
     }
 
-    grads.remove(&wrt.node_id()).ok_or_else(|| {
+    target_grad.ok_or_else(|| {
         MlxError::InvalidArgument("gradient not found — input may not affect the loss".into())
     })
 }
