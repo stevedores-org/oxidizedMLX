@@ -27,3 +27,11 @@ harness = false
 [[bench]]
 name = "rope"
 harness = false
+
+[[bench]]
+name = "ttft"
+harness = false
+
+[[bench]]
+name = "decode_bandwidth"
+harness = false

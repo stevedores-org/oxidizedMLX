@@ -1,0 +1,15 @@
+[package]
+name = "mlx-parity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Backend parity gate: compares Metal vs CPU reference for all ops"
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+mlx-conformance = { path = "../mlx-conformance" }
+smallvec = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+rand_chacha = { workspace = true }
