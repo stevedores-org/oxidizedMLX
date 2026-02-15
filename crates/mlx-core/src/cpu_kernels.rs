@@ -143,7 +143,7 @@ fn reduce_along_axis(
 
     let outer: usize = a.shape.0[..ax].iter().product::<i64>() as usize;
     let dim: usize = a.shape.0[ax] as usize;
-    let inner: usize = a.shape.0[ax + 1..].iter().product::<i64>().max(1) as usize;
+    let inner: usize = a.shape.0[ax + 1..].iter().product::<i64>() as usize;
 
     let mut result = Vec::with_capacity(outer * inner);
     for o in 0..outer {
@@ -250,7 +250,7 @@ fn softmax(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
 
     let outer: usize = a.shape.0[..ax].iter().product::<i64>() as usize;
     let dim: usize = a.shape.0[ax] as usize;
-    let inner: usize = a.shape.0[ax + 1..].iter().product::<i64>().max(1) as usize;
+    let inner: usize = a.shape.0[ax + 1..].iter().product::<i64>() as usize;
 
     let mut data = a.data.to_vec();
 
@@ -593,7 +593,7 @@ mod tests {
             .eval_node(
                 &OpKind::Sum { axis: None },
                 &[input(&data, vec![3])],
-                &meta(vec![1]),
+                &meta(vec![]),
             )
             .unwrap();
         assert_eq!(result, vec![6.0]);

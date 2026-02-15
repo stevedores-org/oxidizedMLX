@@ -185,11 +185,11 @@ proptest! {
         prop_assert!(infer_shape(&OpKind::MatMul, &[&a, &b]).is_err());
     }
 
-    /// Sum(axis=None) always produces shape [1].
+    /// Sum(axis=None) always produces scalar shape.
     #[test]
     fn sum_all_is_scalar(a in arb_shape()) {
         let result = infer_shape(&OpKind::Sum { axis: None }, &[&a]).unwrap();
-        prop_assert_eq!(result, Shape::new(vec![1]));
+        prop_assert_eq!(result, Shape::scalar());
     }
 
     /// Sum(axis=0) removes exactly one dimension for rank >= 2.
