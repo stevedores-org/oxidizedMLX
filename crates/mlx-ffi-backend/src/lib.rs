@@ -293,6 +293,10 @@ impl Backend for MlxFfiBackend {
             OpKind::RmsNorm { .. } => Err(MlxError::InvalidArgument(
                 "RmsNorm not supported by FFI backend".into(),
             )),
+            OpKind::Exp | OpKind::Log => Err(MlxError::InvalidArgument(format!(
+                "{:?} not supported by FFI backend",
+                op
+            ))),
             OpKind::Broadcast { .. }
             | OpKind::LayerNormVjp { .. }
             | OpKind::RmsNormVjp { .. }
@@ -303,7 +307,10 @@ impl Backend for MlxFfiBackend {
             | OpKind::SoftmaxVjp { .. }
             | OpKind::SiluVjp
             | OpKind::GeluVjp
-            | OpKind::Sqrt => Err(MlxError::InvalidArgument(format!(
+            | OpKind::Sqrt
+            | OpKind::Embedding
+            | OpKind::Narrow { .. }
+            | OpKind::Concatenate { .. } => Err(MlxError::InvalidArgument(format!(
                 "{op:?} not supported by FFI backend",
             ))),
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(

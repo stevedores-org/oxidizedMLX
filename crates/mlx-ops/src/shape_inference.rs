@@ -36,6 +36,8 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
 
         // Unary ops preserve shape.
         OpKind::Neg
+        | OpKind::Exp
+        | OpKind::Log
         | OpKind::Silu
         | OpKind::Gelu
         | OpKind::Sqrt
@@ -207,6 +209,74 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             Ok(Shape::new(vec![tq, dh]))
         }
 
+        // Embedding: weight [num_embeddings, embedding_dim], indices [*] -> [*, embedding_dim].
+        OpKind::Embedding => {
+            let weight = inputs.first().ok_or(ShapeError::Mismatch(
+                "Embedding missing weight (input 0)".into(),
+            ))?;
+            let indices = inputs.get(1).ok_or(ShapeError::Mismatch(
+                "Embedding missing indices (input 1)".into(),
+            ))?;
+            if weight.ndim() != 2 {
+                return Err(ShapeError::Mismatch(
+                    "Embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+                ));
+            }
+            let embedding_dim = weight.0[1];
+            let mut out_shape = indices.0.clone();
+            out_shape.push(embedding_dim);
+            Ok(Shape::new(out_shape))
+        }
+
+        // Narrow: slice along axis
+        OpKind::Narrow {
+            axis,
+            start,
+            length,
+        } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let resolved = resolve_axis(*axis, a.ndim())?;
+            let dim_size = a.0[resolved];
+            if *start < 0 || start + length > dim_size {
+                return Err(ShapeError::Mismatch(format!(
+                    "Narrow: start {} + length {} exceeds dim size {}",
+                    start, length, dim_size
+                )));
+            }
+            let mut dims = a.0.clone();
+            dims[resolved] = *length;
+            Ok(Shape::new(dims))
+        }
+
+        // Concatenate: join along axis
+        OpKind::Concatenate { axis } => {
+            let first = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let resolved = resolve_axis(*axis, first.ndim())?;
+            let mut total_dim: i64 = 0;
+            for inp in inputs {
+                if inp.ndim() != first.ndim() {
+                    return Err(ShapeError::Mismatch(
+                        "Concatenate: all inputs must have same ndim".into(),
+                    ));
+                }
+                for (d, (&a, &b)) in first.0.iter().zip(inp.0.iter()).enumerate() {
+                    if d != resolved && a != b {
+                        return Err(ShapeError::Mismatch(format!(
+                            "Concatenate: mismatch at dim {d}: {a} vs {b}"
+                        )));
+                    }
+                }
+                total_dim += inp.0[resolved];
+            }
+            let mut dims = first.0.clone();
+            dims[resolved] = total_dim;
+            Ok(Shape::new(dims))
+        }
+
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
             let a = inputs
@@ -227,7 +297,8 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 None => (0..ndim).rev().collect(),
             };
 
-            // Validate permutation indices.
+            // Validate permutation: bounds + uniqueness in a single pass.
+            let mut seen = vec![false; ndim];
             for &ax in &perm {
                 if ax >= ndim {
                     return Err(ShapeError::InvalidAxis {
@@ -235,17 +306,13 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                         ndim,
                     });
                 }
-            }
-
-            // Ensure all axes are unique.
-            let mut seen = std::collections::HashSet::new();
-            for &ax in &perm {
-                if !seen.insert(ax) {
+                if seen[ax] {
                     return Err(ShapeError::Mismatch(format!(
                         "duplicate axis {} in transpose",
                         ax
                     )));
                 }
+                seen[ax] = true;
             }
 
             let new_dims: Vec<i64> = perm.iter().map(|&ax| a.0[ax]).collect();

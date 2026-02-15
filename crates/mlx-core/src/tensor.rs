@@ -77,6 +77,53 @@ impl Tensor {
         Self::from_data(data.to_vec(), shape, DType::F32, device)
     }
 
+    /// Create a tensor from f32 data on a specific stream.
+    pub fn from_f32_on_stream(data: &[f32], shape: &Shape, stream: &Arc<Stream>) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        let meta = TensorMeta {
+            shape: shape.clone(),
+            dtype: DType::F32,
+        };
+        let node_id = stream.add_constant(data.to_vec(), meta);
+        Ok(Self {
+            node_id,
+            shape: shape.clone(),
+            dtype: DType::F32,
+            device: Device::Gpu, // Assume GPU if custom stream for now, or detect
+            stream: Arc::clone(stream),
+        })
+    }
+
+    /// Create a tensor from f32 data with a specified dtype.
+    ///
+    /// The data is stored as f32 internally; `dtype` records the logical type
+    /// (e.g. F16 weights that were converted to f32 on load).
+    pub fn from_data_with_dtype(
+        data: Vec<f32>,
+        shape: &Shape,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        Self::from_data(data, shape, dtype, device)
+    }
+
     fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
         let stream = default_stream();
         let meta = TensorMeta {
@@ -248,6 +295,27 @@ impl Tensor {
         ))
     }
 
+    /// Embedding lookup: index into rows of this tensor (weight [num_embeddings, embedding_dim])
+    /// by integer indices. `indices` is a tensor of shape `[*]` whose elements are treated as
+    /// integer indices (passed as f32; values 0, 1, …). Output shape is `[*, embedding_dim]`.
+    pub fn embedding_lookup(&self, indices: &Tensor) -> Result<Tensor> {
+        if self.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+            ));
+        }
+        let _num_embeddings = self.shape.0[0];
+        let embedding_dim = self.shape.0[1];
+        let mut out_shape = indices.shape.0.clone();
+        out_shape.push(embedding_dim);
+        Ok(self.lazy_op(
+            OpKind::Embedding,
+            SmallVec::from_slice(&[self.node_id, indices.node_id]),
+            Shape::new(out_shape),
+            self.dtype,
+        ))
+    }
+
     // ── Shape manipulation ──────────────────────────────────────────────
 
     /// Reshape the tensor.
@@ -367,12 +435,12 @@ impl Tensor {
     }
 
     /// Apply Rotary Positional Embeddings.
-    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+    pub fn rope(&self, rotary_dim: usize, pos_offset: usize, theta: f32) -> Tensor {
         self.lazy_op(
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
             },
             SmallVec::from_slice(&[self.node_id]),
             self.shape.clone(),
@@ -509,6 +577,115 @@ impl Tensor {
             SmallVec::from_slice(&[self.node_id, input.node_id]),
             input.shape.clone(),
             input.dtype,
+        ))
+    }
+
+    /// Narrow (slice) along an axis: extract `length` elements starting at `start`.
+    pub fn narrow(&self, axis: i32, start: i64, length: i64) -> Result<Tensor> {
+        let ndim = self.shape.ndim() as i32;
+        let ax = if axis < 0 { ndim + axis } else { axis };
+        if ax < 0 || ax >= ndim {
+            return Err(MlxError::InvalidArgument(format!(
+                "narrow: axis {axis} out of range for ndim {ndim}"
+            )));
+        }
+        let ax_usize = ax as usize;
+        let dim_size = self.shape.0[ax_usize];
+        if start < 0 || start + length > dim_size {
+            return Err(MlxError::InvalidArgument(format!(
+                "narrow: start {start} + length {length} exceeds dim size {dim_size}"
+            )));
+        }
+        let mut new_dims = self.shape.0.clone();
+        new_dims[ax_usize] = length;
+        Ok(self.lazy_op(
+            OpKind::Narrow {
+                axis: ax,
+                start,
+                length,
+            },
+            SmallVec::from_slice(&[self.node_id]),
+            Shape::new(new_dims),
+            self.dtype,
+        ))
+    }
+
+    /// Concatenate tensors along an axis.
+    pub fn cat(tensors: &[&Tensor], axis: i32) -> Result<Tensor> {
+        if tensors.is_empty() {
+            return Err(MlxError::InvalidArgument(
+                "cat requires at least one tensor".into(),
+            ));
+        }
+        let first = tensors[0];
+        let ndim = first.shape.ndim() as i32;
+        let ax = if axis < 0 { ndim + axis } else { axis };
+        if ax < 0 || ax >= ndim {
+            return Err(MlxError::InvalidArgument(format!(
+                "cat: axis {axis} out of range for ndim {ndim}"
+            )));
+        }
+        let ax_usize = ax as usize;
+
+        // Validate shapes and compute output dim
+        let mut total_dim: i64 = 0;
+        for t in tensors {
+            if t.shape.ndim() != first.shape.ndim() {
+                return Err(MlxError::InvalidArgument(
+                    "cat: all tensors must have same ndim".into(),
+                ));
+            }
+            for (d, (&a, &b)) in first.shape.0.iter().zip(t.shape.0.iter()).enumerate() {
+                if d != ax_usize && a != b {
+                    return Err(MlxError::ShapeMismatch {
+                        expected: first.shape.0.clone(),
+                        got: t.shape.0.clone(),
+                    });
+                }
+            }
+            total_dim += t.shape.0[ax_usize];
+        }
+
+        let mut new_dims = first.shape.0.clone();
+        new_dims[ax_usize] = total_dim;
+
+        let inputs: SmallVec<[NodeId; 2]> = tensors.iter().map(|t| t.node_id).collect();
+
+        Ok(first.lazy_op(
+            OpKind::Concatenate { axis: ax },
+            inputs,
+            Shape::new(new_dims),
+            first.dtype,
+        ))
+    }
+
+    /// Single-head attention: Q @ K^T * scale → causal mask → softmax → @ V.
+    /// Q: [Tq, Dh], K: [Tk, Dh], V: [Tk, Dh] → Output: [Tq, Dh]
+    pub fn attention(&self, k: &Tensor, v: &Tensor, scale: f32, causal: bool) -> Result<Tensor> {
+        if self.shape.ndim() != 2 || k.shape.ndim() != 2 || v.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "attention requires 2D tensors [seq, head_dim]".into(),
+            ));
+        }
+        let tq = self.shape.0[0];
+        let dh = self.shape.0[1];
+        if k.shape.0[1] != dh {
+            return Err(MlxError::ShapeMismatch {
+                expected: self.shape.0.clone(),
+                got: k.shape.0.clone(),
+            });
+        }
+        if v.shape.0[1] != dh || k.shape.0[0] != v.shape.0[0] {
+            return Err(MlxError::ShapeMismatch {
+                expected: k.shape.0.clone(),
+                got: v.shape.0.clone(),
+            });
+        }
+        Ok(self.lazy_op(
+            OpKind::Attention { scale, causal },
+            SmallVec::from_slice(&[self.node_id, k.node_id, v.node_id]),
+            Shape::new(vec![tq, dh]),
+            self.dtype,
         ))
     }
 

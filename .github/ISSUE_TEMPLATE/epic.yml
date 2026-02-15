@@ -1,0 +1,63 @@
+name: Epic
+description: Multi-week architectural milestone spanning multiple stories
+title: "Epic: <name>"
+labels: ["epic"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this epic matters + what capability it unlocks
+      placeholder: |
+        Example: Enable loading pretrained LLM weights via safetensors + mmap.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included / excluded in this epic
+      placeholder: |
+        Included:
+        - Reader + mmap support
+        Excluded:
+        - Quantized GGUF
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: Deliverables
+      description: Concrete outputs expected when epic is complete
+      placeholder: |
+        - mlx-io crate implements safetensors read/write
+        - Golden tests pass
+        - CI wired for conformance
+    validations:
+      required: true
+
+  - type: textarea
+    id: stories
+    attributes:
+      label: Stories (child issues)
+      description: Link all story-level issues here
+      placeholder: |
+        - [ ] #123 Story: Safetensors reader
+        - [ ] #124 Story: mmap loader
+        - [ ] #125 Story: writer + roundtrip tests
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Epic Acceptance Criteria
+      description: Conditions required to close the epic
+      placeholder: |
+        - All child stories closed
+        - CI green
+        - Docs updated
+    validations:
+      required: true

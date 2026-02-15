@@ -44,6 +44,8 @@ pub enum OpKind {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
 
     // ── Reductions ──────────────────────────────────────────────────────
     Sum {
@@ -97,6 +99,10 @@ pub enum OpKind {
         target_shape: Shape,
     },
 
+    // ── Embedding ──────────────────────────────────────────────────
+    /// Embedding lookup: weight [num_embeddings, embedding_dim], indices [*] (f32 as int) → [*, embedding_dim].
+    Embedding,
+
     // ── Attention ──────────────────────────────────────────────────
     /// Fused scale + causal-mask + softmax along last axis.
     /// Input: scores [Tq, Tk], output: probs [Tq, Tk]
@@ -141,6 +147,23 @@ pub enum OpKind {
         base: f32,
         offset: usize,
         traditional: bool,
+    },
+
+    // ── Indexing / gathering ─────────────────────────────────────────────
+    /// Extract a contiguous slice along an axis.
+    /// Inputs: [input]
+    /// Output: narrowed tensor
+    Narrow {
+        axis: i32,
+        start: i64,
+        length: i64,
+    },
+
+    /// Concatenate tensors along an axis.
+    /// Inputs: [tensor_0, tensor_1, ...]
+    /// Output: concatenated tensor
+    Concatenate {
+        axis: i32,
     },
 }
 
@@ -305,6 +328,8 @@ enum OpKey {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
     Sum {
         axis: Option<i32>,
     },
@@ -359,12 +384,21 @@ enum OpKey {
         offset: usize,
         traditional: bool,
     },
+    Embedding,
     SoftmaxVjp {
         axis: i32,
     },
     SiluVjp,
     GeluVjp,
     Sqrt,
+    Narrow {
+        axis: i32,
+        start: i64,
+        length: i64,
+    },
+    Concatenate {
+        axis: i32,
+    },
 }
 
 impl OpKey {
@@ -377,6 +411,8 @@ impl OpKey {
             OpKind::Mul => OpKey::Mul,
             OpKind::Div => OpKey::Div,
             OpKind::Neg => OpKey::Neg,
+            OpKind::Exp => OpKey::Exp,
+            OpKind::Log => OpKey::Log,
             OpKind::Sum { axis } => OpKey::Sum { axis: *axis },
             OpKind::Mean { axis } => OpKey::Mean { axis: *axis },
             OpKind::Max { axis } => OpKey::Max { axis: *axis },
@@ -429,10 +465,21 @@ impl OpKey {
                 offset: *offset,
                 traditional: *traditional,
             },
+            OpKind::Embedding => OpKey::Embedding,
             OpKind::SoftmaxVjp { axis } => OpKey::SoftmaxVjp { axis: *axis },
             OpKind::SiluVjp => OpKey::SiluVjp,
             OpKind::GeluVjp => OpKey::GeluVjp,
             OpKind::Sqrt => OpKey::Sqrt,
+            OpKind::Narrow {
+                axis,
+                start,
+                length,
+            } => OpKey::Narrow {
+                axis: *axis,
+                start: *start,
+                length: *length,
+            },
+            OpKind::Concatenate { axis } => OpKey::Concatenate { axis: *axis },
         }
     }
 }
@@ -530,6 +577,7 @@ mod tests {
             meta.clone(),
             Some(&[1.0, 2.0]),
         );
+        // Constants must NOT be deduplicated — they may receive independent gradients
         assert_ne!(a, b);
         assert_eq!(g.len(), 2);
     }

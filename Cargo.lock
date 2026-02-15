@@ -626,6 +626,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "memmap2"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "metal"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -681,6 +690,7 @@ dependencies = [
 name = "mlx-core"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "smallvec",
  "thiserror",
 ]
@@ -707,7 +717,11 @@ dependencies = [
 name = "mlx-io"
 version = "0.1.0"
 dependencies = [
+ "half",
+ "memmap2",
  "mlx-core",
+ "safetensors",
+ "tempfile",
 ]
 
 [[package]]
@@ -732,6 +746,7 @@ version = "0.1.0"
 dependencies = [
  "mlx-conformance",
  "mlx-core",
+ "rand",
 ]
 
 [[package]]
@@ -1089,6 +1104,16 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
+]
+
+[[package]]
+name = "safetensors"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc0cdb7198d738a111f6df8fef42cb175412c311d0c4ac9126ff4e550ad1a0e8"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

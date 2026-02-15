@@ -1,0 +1,38 @@
+name: Backend Parity Gate
+description: Track requirements before enabling Metal by default
+title: "Gate: Metal backend default enablement"
+labels: ["parity", "gate"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      placeholder: |
+        Metal backend cannot be default until parity suite is green for all required ops.
+    validations:
+      required: true
+
+  - type: textarea
+    id: required_ops
+    attributes:
+      label: Required Ops Matrix
+      placeholder: |
+        - [ ] Add/Sub/Mul/Div/Neg
+        - [ ] MatMul
+        - [ ] Softmax + Mask
+        - [ ] RMSNorm / LayerNorm
+        - [ ] RoPE
+        - [ ] Attention block golden
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: |
+        - cargo test -p mlx-parity passes on Apple Silicon
+        - CI runs parity suite nightly
+        - Feature flag flips default backend
+    validations:
+      required: true

@@ -29,10 +29,19 @@ impl Backend for CpuRefBackend {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.iter().map(|x| -x).collect())
             }
+            OpKind::Exp => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.exp()).collect())
+            }
+            OpKind::Log => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.ln()).collect())
+            }
             OpKind::Sum { axis } => reduce_sum(inputs, *axis),
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
             OpKind::MatMul => matmul(inputs),
+            OpKind::Embedding => embedding_lookup(inputs, output_meta),
             OpKind::Reshape { .. } => {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.to_vec())
@@ -82,6 +91,12 @@ impl Backend for CpuRefBackend {
                 offset,
                 traditional,
             } => rope(inputs, *base, *offset, *traditional),
+            OpKind::Narrow {
+                axis,
+                start,
+                length,
+            } => narrow(inputs, *axis, *start, *length),
+            OpKind::Concatenate { axis } => concatenate(inputs, *axis),
         }
     }
 }
@@ -297,6 +312,27 @@ fn softmax(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
         }
     }
     Ok(data)
+}
+
+fn embedding_lookup(inputs: &[NodeInput<'_>], output_meta: &TensorMeta) -> Result<Vec<f32>> {
+    let weight = require_input(inputs, 0)?;
+    let indices = require_input(inputs, 1)?;
+    if weight.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+        ));
+    }
+    let num_embeddings = weight.shape.0[0] as usize;
+    let embedding_dim = weight.shape.0[1] as usize;
+    let mut result = vec![0.0f32; output_meta.shape.numel() as usize];
+    for (i, &idx_f) in indices.data.iter().enumerate() {
+        let idx = idx_f as i32;
+        let row = idx.clamp(0, num_embeddings as i32 - 1) as usize;
+        let src = row * embedding_dim;
+        let dst = i * embedding_dim;
+        result[dst..dst + embedding_dim].copy_from_slice(&weight.data[src..src + embedding_dim]);
+    }
+    Ok(result)
 }
 
 fn layer_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Vec<f32>> {
@@ -775,6 +811,88 @@ fn cpu_attention(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<V
     Ok(y)
 }
 
+fn narrow(inputs: &[NodeInput<'_>], axis: i32, start: i64, length: i64) -> Result<Vec<f32>> {
+    let a = require_input(inputs, 0)?;
+    let ndim = a.shape.ndim() as i32;
+    let ax = if axis < 0 { ndim + axis } else { axis };
+    if ax < 0 || ax >= ndim {
+        return Err(MlxError::InvalidArgument(format!(
+            "narrow: axis {axis} out of range for ndim {ndim}"
+        )));
+    }
+    let ax = ax as usize;
+    let dim_size = a.shape.0[ax] as i64;
+    if start < 0 || start + length > dim_size {
+        return Err(MlxError::InvalidArgument(format!(
+            "narrow: start {start} + length {length} exceeds dim size {dim_size}"
+        )));
+    }
+
+    let outer: usize = a.shape.0[..ax].iter().product::<i64>() as usize;
+    let dim: usize = a.shape.0[ax] as usize;
+    let inner: usize = a.shape.0[ax + 1..].iter().product::<i64>() as usize;
+    let start = start as usize;
+    let length = length as usize;
+
+    let mut result = Vec::with_capacity(outer * length * inner);
+    for o in 0..outer {
+        for d in start..start + length {
+            let base = (o * dim + d) * inner;
+            result.extend_from_slice(&a.data[base..base + inner]);
+        }
+    }
+    Ok(result)
+}
+
+fn concatenate(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
+    if inputs.is_empty() {
+        return Err(MlxError::InvalidArgument(
+            "Concatenate requires at least one input".into(),
+        ));
+    }
+    let first = &inputs[0];
+    let ndim = first.shape.ndim() as i32;
+    let ax = if axis < 0 { ndim + axis } else { axis };
+    if ax < 0 || ax >= ndim {
+        return Err(MlxError::InvalidArgument(format!(
+            "concatenate: axis {axis} out of range for ndim {ndim}"
+        )));
+    }
+    let ax = ax as usize;
+
+    // Validate all inputs have same shape except along concat axis
+    for inp in &inputs[1..] {
+        if inp.shape.ndim() != first.shape.ndim() {
+            return Err(MlxError::InvalidArgument(
+                "Concatenate: all inputs must have same ndim".into(),
+            ));
+        }
+        for (d, (&a, &b)) in first.shape.0.iter().zip(inp.shape.0.iter()).enumerate() {
+            if d != ax && a != b {
+                return Err(MlxError::ShapeMismatch {
+                    expected: first.shape.0.clone(),
+                    got: inp.shape.0.clone(),
+                });
+            }
+        }
+    }
+
+    let outer: usize = first.shape.0[..ax].iter().product::<i64>() as usize;
+    let inner: usize = first.shape.0[ax + 1..].iter().product::<i64>() as usize;
+
+    let total_dim: usize = inputs.iter().map(|i| i.shape.0[ax] as usize).sum();
+    let mut result = Vec::with_capacity(outer * total_dim * inner);
+
+    for o in 0..outer {
+        for inp in inputs {
+            let dim = inp.shape.0[ax] as usize;
+            let base = o * dim * inner;
+            result.extend_from_slice(&inp.data[base..base + dim * inner]);
+        }
+    }
+    Ok(result)
+}
+
 fn rope(inputs: &[NodeInput<'_>], base: f32, offset: usize, traditional: bool) -> Result<Vec<f32>> {
     let a = require_input(inputs, 0)?;
     let ndim = a.shape.ndim();
@@ -975,32 +1093,36 @@ mod tests {
     #[test]
     fn test_rope_offsets() {
         let backend = CpuRefBackend;
-        let base = 10_000.0;
-        let offset = 100usize;
-        let traditional = false;
+        let theta = 10_000.0;
+        let pos_offset = 100usize;
+        let rotary_dim = 4;
         // Shape: 1 seq, 4 head_dim. total = 4 floats.
         let data = [1.0, 0.0, 0.0, 1.0];
         let result = backend
             .eval_node(
-                &OpKind::RoPE {
-                    base,
-                    offset,
-                    traditional,
+                &OpKind::Rope {
+                    rotary_dim,
+                    pos_offset,
+                    theta,
                 },
                 &[input(&data, vec![1, 4])],
                 &meta(vec![1, 4]),
             )
             .unwrap();
 
-        // Expected values (same logic as before)
+        // Expected values (interleaved)
+        // i=0: inv_freq = 1.0. angle = 100.
         let cos100 = 100.0f32.cos();
         let sin100 = 100.0f32.sin();
+        // i=1: inv_freq = 10000^-0.5 = 0.01. angle = 1.0.
         let cos1 = 1.0f32.cos();
         let sin1 = 1.0f32.sin();
 
+        // data[0]=1, data[1]=0 -> out[0]=cos, out[1]=sin
+        // data[2]=0, data[3]=1 -> out[2]=-sin, out[3]=cos
         assert!((result[0] - cos100).abs() < 1e-5);
-        assert!((result[2] - sin100).abs() < 1e-5);
-        assert!((result[1] - (-sin1)).abs() < 1e-5);
+        assert!((result[1] - sin100).abs() < 1e-5);
+        assert!((result[2] - (-sin1)).abs() < 1e-5);
         assert!((result[3] - cos1).abs() < 1e-5);
     }
 
@@ -1011,10 +1133,10 @@ mod tests {
         let numel = 128 * 128;
         let data = vec![1.0; numel];
         let result = backend.eval_node(
-            &OpKind::RoPE {
-                base: 10000.0,
-                offset: 0,
-                traditional: true,
+            &OpKind::Rope {
+                rotary_dim: 128,
+                pos_offset: 0,
+                theta: 10000.0,
             },
             &[input(&data, shape.clone())],
             &meta(shape.clone()),

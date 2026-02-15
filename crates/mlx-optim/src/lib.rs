@@ -189,6 +189,68 @@ impl Optimizer for AdamW {
     }
 }
 
+// ── Learning Rate Schedulers ──────────────────────────────────────────
+
+/// Trait for learning rate schedulers.
+pub trait LrScheduler {
+    /// Return the learning rate for a given step.
+    fn get_lr(&self, step: u64) -> f32;
+}
+
+/// Step-decay learning rate scheduler.
+///
+/// Decays the learning rate by `gamma` every `step_size` steps:
+/// `lr = base_lr * gamma^(step / step_size)`
+pub struct StepLR {
+    base_lr: f32,
+    step_size: u64,
+    gamma: f32,
+}
+
+impl StepLR {
+    pub fn new(base_lr: f32, step_size: u64, gamma: f32) -> Self {
+        Self {
+            base_lr,
+            step_size,
+            gamma,
+        }
+    }
+}
+
+impl LrScheduler for StepLR {
+    fn get_lr(&self, step: u64) -> f32 {
+        self.base_lr * self.gamma.powi((step / self.step_size) as i32)
+    }
+}
+
+/// Cosine annealing learning rate scheduler.
+///
+/// `lr = eta_min + 0.5 * (base_lr - eta_min) * (1 + cos(pi * step / t_max))`
+pub struct CosineAnnealingLR {
+    base_lr: f32,
+    t_max: u64,
+    eta_min: f32,
+}
+
+impl CosineAnnealingLR {
+    pub fn new(base_lr: f32, t_max: u64, eta_min: f32) -> Self {
+        Self {
+            base_lr,
+            t_max,
+            eta_min,
+        }
+    }
+}
+
+impl LrScheduler for CosineAnnealingLR {
+    fn get_lr(&self, step: u64) -> f32 {
+        self.eta_min
+            + 0.5
+                * (self.base_lr - self.eta_min)
+                * (1.0 + (std::f32::consts::PI * step as f32 / self.t_max as f32).cos())
+    }
+}
+
 /// Create a scalar tensor broadcast to the same shape/dtype/device as `like`.
 fn scalar_like(val: f32, like: &Tensor) -> Result<Tensor> {
     Tensor::from_f32(&[val], &mlx_core::Shape::scalar(), like.device())?.broadcast_to(like.shape())
@@ -283,5 +345,27 @@ mod tests {
         let v2 = p2[0].to_vec_f32().unwrap()[0];
         assert!(v1 < 1.0, "param should decrease after step 1");
         assert!(v2 < v1, "param should decrease after step 2");
+    }
+
+    #[test]
+    fn test_step_lr() {
+        let sched = StepLR::new(0.1, 10, 0.5);
+        assert!((sched.get_lr(0) - 0.1).abs() < 1e-6);
+        assert!((sched.get_lr(5) - 0.1).abs() < 1e-6);
+        assert!((sched.get_lr(10) - 0.05).abs() < 1e-6);
+        assert!((sched.get_lr(20) - 0.025).abs() < 1e-6);
+        assert!((sched.get_lr(30) - 0.0125).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_annealing_lr() {
+        let sched = CosineAnnealingLR::new(0.1, 100, 0.001);
+        // At step 0: lr = 0.001 + 0.5*0.099*(1+cos(0)) = 0.001 + 0.099 = 0.1
+        assert!((sched.get_lr(0) - 0.1).abs() < 1e-6);
+        // At step t_max/2 (50): lr = 0.001 + 0.5*0.099*(1+cos(pi/2)) ≈ 0.001 + 0.0495 ≈ 0.0505
+        let lr_mid = sched.get_lr(50);
+        assert!((lr_mid - 0.0505).abs() < 1e-3, "mid lr: {lr_mid}");
+        // At step t_max (100): lr = 0.001 + 0.5*0.099*(1+cos(pi)) = 0.001 + 0 = 0.001
+        assert!((sched.get_lr(100) - 0.001).abs() < 1e-6);
     }
 }

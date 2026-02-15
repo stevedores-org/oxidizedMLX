@@ -27,3 +27,15 @@ tracing-subscriber = { workspace = true }
 [[bench]]
 name = "gemm"
 harness = false
+
+[[bench]]
+name = "reductions"
+harness = false
+
+[[bench]]
+name = "norm"
+harness = false
+
+[[bench]]
+name = "rope"
+harness = false
