@@ -184,6 +184,7 @@ pub fn default_stream() -> Arc<Stream> {
 mod tests {
     use super::*;
     use crate::graph::TensorMeta;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn test_stream_constant() {
@@ -226,5 +227,79 @@ mod tests {
         );
         stream.eval(c).unwrap();
         assert_eq!(stream.get_buffer(c).unwrap(), vec![4.0, 6.0]);
+    }
+
+    #[test]
+    fn test_eval_is_memoized_no_recompute() {
+        struct CountingBackend {
+            inner: crate::cpu_kernels::CpuRefBackend,
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Backend for CountingBackend {
+            fn eval_node(
+                &self,
+                op: &OpKind,
+                inputs: &[NodeInput<'_>],
+                output_meta: &TensorMeta,
+            ) -> Result<Vec<f32>> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.inner.eval_node(op, inputs, output_meta)
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let stream = Stream::new(Box::new(CountingBackend {
+            inner: crate::cpu_kernels::CpuRefBackend,
+            calls: Arc::clone(&calls),
+        }));
+
+        let a = stream.add_constant(
+            vec![1.0, 2.0],
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+        let b = stream.add_constant(
+            vec![3.0, 4.0],
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+
+        // Two op nodes: add then neg
+        let add = stream.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+        let out = stream.add_op(
+            OpKind::Neg,
+            smallvec::SmallVec::from_slice(&[add]),
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+
+        stream.eval(out).unwrap();
+        let after_first = calls.load(Ordering::Relaxed);
+        assert_eq!(after_first, 2);
+        assert_eq!(stream.get_buffer(out).unwrap(), vec![-4.0, -6.0]);
+
+        // Repeated eval should not call into the backend again.
+        stream.eval(out).unwrap();
+        let after_second = calls.load(Ordering::Relaxed);
+        assert_eq!(after_first, after_second);
+
+        // Evaluating already-materialized intermediates should also be a no-op.
+        stream.eval(add).unwrap();
+        let after_third = calls.load(Ordering::Relaxed);
+        assert_eq!(after_second, after_third);
     }
 }
