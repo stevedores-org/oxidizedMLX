@@ -13,12 +13,20 @@ struct Args {
 enum Cmd {
     /// Run a quick smoke test of core ops.
     Smoke,
+
+    /// Exercise the C ABI shim (mlx-sys) and free all handles (useful for valgrind).
+    CabiSmoke {
+        /// Iterations of the allocate/op/free loop.
+        #[arg(long, default_value_t = 1000)]
+        iters: usize,
+    },
 }
 
 fn main() {
     let args = Args::parse();
     match args.cmd {
         Cmd::Smoke => smoke(),
+        Cmd::CabiSmoke { iters } => cabi_smoke(iters),
     }
 }
 
@@ -74,4 +82,58 @@ fn smoke() {
     println!("zeros [2,3] = {:?}", zeros.to_vec_f32().unwrap());
 
     println!("\nAll smoke tests passed.");
+}
+
+fn cabi_smoke(iters: usize) {
+    println!("C ABI smoke (native shim): iters={iters}");
+
+    unsafe {
+        // Device lifecycle
+        let dev = mlx_sys::mlxrs_default_device();
+        assert!(!dev.is_null());
+
+        for _ in 0..iters {
+            let shape: [i64; 2] = [2, 2];
+            let a_data: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+            let b_data: [f32; 4] = [5.0, 6.0, 7.0, 8.0];
+
+            // Allocate tensors
+            let a = mlx_sys::mlxrs_from_f32(
+                dev,
+                shape.as_ptr(),
+                shape.len(),
+                a_data.as_ptr(),
+                a_data.len(),
+            );
+            let b = mlx_sys::mlxrs_from_f32(
+                dev,
+                shape.as_ptr(),
+                shape.len(),
+                b_data.as_ptr(),
+                b_data.len(),
+            );
+            assert!(!a.is_null());
+            assert!(!b.is_null());
+
+            // Ops
+            let c = mlx_sys::mlxrs_matmul(a, b);
+            assert!(!c.is_null());
+            mlx_sys::mlxrs_eval(c);
+
+            // Materialize output to ensure buffers get touched
+            let n = mlx_sys::mlxrs_numel(c) as usize;
+            let mut out = vec![0.0f32; n];
+            let rc = mlx_sys::mlxrs_to_f32_vec(c, out.as_mut_ptr(), n);
+            assert_eq!(rc, 0);
+
+            // Free lifecycle
+            mlx_sys::mlxrs_free_tensor(a);
+            mlx_sys::mlxrs_free_tensor(b);
+            mlx_sys::mlxrs_free_tensor(c);
+        }
+
+        mlx_sys::mlxrs_free_device(dev);
+    }
+
+    println!("C ABI smoke passed.");
 }

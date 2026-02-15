@@ -402,6 +402,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "mlx-core",
+ "mlx-sys",
 ]
 
 [[package]]

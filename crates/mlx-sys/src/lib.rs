@@ -6,6 +6,9 @@
 
 #![allow(non_camel_case_types)]
 
+#[cfg(all(feature = "native", feature = "cpp"))]
+compile_error!("features `native` and `cpp` are mutually exclusive");
+
 // libc types re-exported for cpp feature extern declarations.
 #[cfg(feature = "cpp")]
 use libc::{c_int, size_t};
@@ -100,7 +103,7 @@ mod native_impl;
 #[cfg(feature = "native")]
 pub use native_impl::*;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 
