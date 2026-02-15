@@ -22,5 +22,7 @@ mlx-conformance = { path = "../mlx-conformance" }
 [features]
 default = ["native"]
 native = ["dep:mlx-core"]
-cpp = ["dep:cmake"]
+ffi = ["dep:cmake"]
+# Backward-compat alias (older docs/code used `cpp` for the external backend).
+cpp = ["ffi"]
 bindgen = ["dep:bindgen"]
