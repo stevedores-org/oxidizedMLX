@@ -2,7 +2,7 @@
 
 use mlx_core::backend::{Backend, NodeInput};
 use mlx_core::graph::OpKind;
-use mlx_core::types::{DType, Shape};
+use mlx_core::types::DType;
 use mlx_core::{MlxError, Result};
 use mlx_sys as sys;
 use parking_lot::Mutex;
@@ -20,12 +20,18 @@ pub struct MlxFfiBackend {
     next: AtomicU64,
 }
 
+// SAFETY: The MLX C++ runtime is internally thread-safe. The NonNull pointers
+// wrap MLX device/tensor handles protected by the arena Mutex.
+unsafe impl Send for MlxFfiBackend {}
+unsafe impl Sync for MlxFfiBackend {}
+
 impl MlxFfiBackend {
     /// Create a backend using MLX's default device.
     pub fn new_default_device() -> Result<Self> {
         let dev = unsafe { sys::mlxrs_default_device() };
-        let device = NonNull::new(dev)
-            .ok_or_else(|| MlxError::BackendUnavailable("mlxrs_default_device returned null"))?;
+        let device = NonNull::new(dev).ok_or(MlxError::BackendUnavailable(
+            "mlxrs_default_device returned null",
+        ))?;
         Ok(Self {
             device,
             arena: Mutex::new(HashMap::new()),
@@ -50,6 +56,7 @@ impl MlxFfiBackend {
         }
     }
 
+    #[allow(dead_code)]
     fn dtype_to_sys(dtype: DType) -> sys::mlx_dtype_t {
         match dtype {
             DType::F32 => sys::mlx_dtype_t::F32,
@@ -76,7 +83,7 @@ impl MlxFfiBackend {
             )
         };
         let t = NonNull::new(ptr)
-            .ok_or_else(|| MlxError::BackendUnavailable("mlxrs_from_f32 returned null"))?;
+            .ok_or(MlxError::BackendUnavailable("mlxrs_from_f32 returned null"))?;
         Ok(self.track_tensor(t))
     }
 
@@ -97,7 +104,7 @@ impl MlxFfiBackend {
     fn call_unary(
         &self,
         input: &NodeInput<'_>,
-        f: unsafe fn(*mut sys::mlx_tensor_t) -> *mut sys::mlx_tensor_t,
+        f: unsafe extern "C" fn(*mut sys::mlx_tensor_t) -> *mut sys::mlx_tensor_t,
     ) -> Result<Vec<f32>> {
         let h = self.make_from_f32(input)?;
         let t = self
@@ -108,7 +115,7 @@ impl MlxFfiBackend {
             .expect("tensor handle missing");
         let out_ptr = unsafe { f(t.as_ptr()) };
         let out = NonNull::new(out_ptr)
-            .ok_or_else(|| MlxError::BackendUnavailable("mlxrs unary op returned null"))?;
+            .ok_or(MlxError::BackendUnavailable("mlxrs unary op returned null"))?;
         let out_handle = self.track_tensor(out);
         let result = self.read_f32(out)?;
         self.free_tensor(out_handle);
@@ -120,7 +127,10 @@ impl MlxFfiBackend {
         &self,
         a: &NodeInput<'_>,
         b: &NodeInput<'_>,
-        f: unsafe fn(*mut sys::mlx_tensor_t, *mut sys::mlx_tensor_t) -> *mut sys::mlx_tensor_t,
+        f: unsafe extern "C" fn(
+            *mut sys::mlx_tensor_t,
+            *mut sys::mlx_tensor_t,
+        ) -> *mut sys::mlx_tensor_t,
     ) -> Result<Vec<f32>> {
         let ha = self.make_from_f32(a)?;
         let hb = self.make_from_f32(b)?;
@@ -137,8 +147,9 @@ impl MlxFfiBackend {
             .copied()
             .expect("tensor handle missing");
         let out_ptr = unsafe { f(ta.as_ptr(), tb.as_ptr()) };
-        let out = NonNull::new(out_ptr)
-            .ok_or_else(|| MlxError::BackendUnavailable("mlxrs binary op returned null"))?;
+        let out = NonNull::new(out_ptr).ok_or(MlxError::BackendUnavailable(
+            "mlxrs binary op returned null",
+        ))?;
         let out_handle = self.track_tensor(out);
         let result = self.read_f32(out)?;
         self.free_tensor(out_handle);
@@ -159,8 +170,8 @@ impl MlxFfiBackend {
             Some(ax) => unsafe { sys::mlxrs_sum(t.as_ptr(), ax as _) },
             None => unsafe { sys::mlxrs_sum_all(t.as_ptr()) },
         };
-        let out = NonNull::new(out_ptr)
-            .ok_or_else(|| MlxError::BackendUnavailable("mlxrs_sum returned null"))?;
+        let out =
+            NonNull::new(out_ptr).ok_or(MlxError::BackendUnavailable("mlxrs_sum returned null"))?;
         let out_handle = self.track_tensor(out);
         let result = self.read_f32(out)?;
         self.free_tensor(out_handle);
@@ -171,9 +182,7 @@ impl MlxFfiBackend {
 
 fn require_input<'a>(inputs: &'a [NodeInput<'_>], idx: usize) -> Result<&'a NodeInput<'a>> {
     inputs.get(idx).ok_or_else(|| {
-        MlxError::InvalidArgument(format!(
-            "mlx-ffi-backend expected input at index {idx}"
-        ))
+        MlxError::InvalidArgument(format!("mlx-ffi-backend expected input at index {idx}"))
     })
 }
 
@@ -200,13 +209,17 @@ impl Backend for MlxFfiBackend {
                 let b = require_input(inputs, 1)?;
                 self.call_binary(a, b, sys::mlxrs_add)
             }
-            OpKind::Sub => Err(MlxError::InvalidArgument("Sub not supported by FFI backend".into())),
+            OpKind::Sub => Err(MlxError::InvalidArgument(
+                "Sub not supported by FFI backend".into(),
+            )),
             OpKind::Mul => {
                 let a = require_input(inputs, 0)?;
                 let b = require_input(inputs, 1)?;
                 self.call_binary(a, b, sys::mlxrs_mul)
             }
-            OpKind::Div => Err(MlxError::InvalidArgument("Div not supported by FFI backend".into())),
+            OpKind::Div => Err(MlxError::InvalidArgument(
+                "Div not supported by FFI backend".into(),
+            )),
             OpKind::Neg => {
                 let a = require_input(inputs, 0)?;
                 self.call_unary(a, sys::mlxrs_neg)
@@ -220,8 +233,12 @@ impl Backend for MlxFfiBackend {
                 let a = require_input(inputs, 0)?;
                 self.call_sum(a, *axis)
             }
-            OpKind::Mean { .. } => Err(MlxError::InvalidArgument("Mean not supported by FFI backend".into())),
-            OpKind::Max { .. } => Err(MlxError::InvalidArgument("Max not supported by FFI backend".into())),
+            OpKind::Mean { .. } => Err(MlxError::InvalidArgument(
+                "Mean not supported by FFI backend".into(),
+            )),
+            OpKind::Max { .. } => Err(MlxError::InvalidArgument(
+                "Max not supported by FFI backend".into(),
+            )),
             OpKind::Reshape { new_shape } => {
                 let a = require_input(inputs, 0)?;
                 let h = self.make_from_f32(a)?;
@@ -235,7 +252,7 @@ impl Backend for MlxFfiBackend {
                     sys::mlxrs_reshape(t.as_ptr(), new_shape.0.as_ptr(), new_shape.0.len())
                 };
                 let out = NonNull::new(out_ptr)
-                    .ok_or_else(|| MlxError::BackendUnavailable("mlxrs_reshape returned null"))?;
+                    .ok_or(MlxError::BackendUnavailable("mlxrs_reshape returned null"))?;
                 let out_handle = self.track_tensor(out);
                 let result = self.read_f32(out)?;
                 self.free_tensor(out_handle);
@@ -257,18 +274,30 @@ impl Backend for MlxFfiBackend {
                     .expect("tensor handle missing");
                 let out_ptr = unsafe { sys::mlxrs_softmax(t.as_ptr(), *axis as _) };
                 let out = NonNull::new(out_ptr)
-                    .ok_or_else(|| MlxError::BackendUnavailable("mlxrs_softmax returned null"))?;
+                    .ok_or(MlxError::BackendUnavailable("mlxrs_softmax returned null"))?;
                 let out_handle = self.track_tensor(out);
                 let result = self.read_f32(out)?;
                 self.free_tensor(out_handle);
                 self.free_tensor(h);
                 Ok(result)
             }
-            OpKind::Silu => Err(MlxError::InvalidArgument("Silu not supported by FFI backend".into())),
-            OpKind::Gelu => Err(MlxError::InvalidArgument("Gelu not supported by FFI backend".into())),
-            OpKind::LayerNorm { .. } => Err(MlxError::InvalidArgument("LayerNorm not supported by FFI backend".into())),
-            OpKind::RmsNorm { .. } => Err(MlxError::InvalidArgument("RmsNorm not supported by FFI backend".into())),
-            OpKind::Broadcast { .. } => Err(MlxError::InvalidArgument("Broadcast not supported by FFI backend".into())),
+            OpKind::Silu => Err(MlxError::InvalidArgument(
+                "Silu not supported by FFI backend".into(),
+            )),
+            OpKind::Gelu => Err(MlxError::InvalidArgument(
+                "Gelu not supported by FFI backend".into(),
+            )),
+            OpKind::LayerNorm { .. } => Err(MlxError::InvalidArgument(
+                "LayerNorm not supported by FFI backend".into(),
+            )),
+            OpKind::RmsNorm { .. } => Err(MlxError::InvalidArgument(
+                "RmsNorm not supported by FFI backend".into(),
+            )),
+            OpKind::Broadcast { .. } | OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
+                Err(MlxError::InvalidArgument(format!(
+                    "{op:?} not supported by FFI backend",
+                )))
+            }
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(
                 "Constant/Parameter should be pre-materialized by Stream".into(),
             )),
@@ -280,7 +309,7 @@ impl Backend for MlxFfiBackend {
 mod tests {
     use super::*;
     use mlx_core::graph::TensorMeta;
-    use mlx_core::types::DType;
+    use mlx_core::types::{DType, Shape};
 
     fn meta(shape: &[i64]) -> TensorMeta {
         TensorMeta {
