@@ -43,10 +43,10 @@ kernel void rope_f32(
     if ((d & 1u) != 0u) return;
 
     uint i = d >> 1;
-    float inv_freq = pow(p.theta, -2.0f * float(i) / float(p.rotary_dim));
+    float inv_freq = precise::pow(p.theta, -2.0f * float(i) / float(p.rotary_dim));
     float angle = float(p.pos_offset + t) * inv_freq;
-    float c = cos(angle);
-    float s = sin(angle);
+    float c = precise::cos(angle);
+    float s = precise::sin(angle);
 
     uint base = t * p.head_dim + (i << 1);
     float x0 = x[base];
