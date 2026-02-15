@@ -42,3 +42,7 @@ proptest:
 # Run benchmarks
 bench:
     cargo bench -p mlx-cli
+
+# Create GitHub labels/milestones/epic issues for the delivery plan (idempotent).
+roadmap-bootstrap:
+    cargo run -p mlx-roadmap -- bootstrap

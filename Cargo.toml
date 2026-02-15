@@ -12,6 +12,7 @@ members = [
   "crates/mlx-io",
   "crates/mlx-conformance",
   "crates/mlx-cli",
+  "crates/mlx-roadmap",
 ]
 
 [workspace.package]

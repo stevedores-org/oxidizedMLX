@@ -469,6 +469,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mlx-roadmap"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "mlx-sys"
 version = "0.1.0"
 dependencies = [
