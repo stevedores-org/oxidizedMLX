@@ -395,13 +395,115 @@ mod tests {
         mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
     }
 
-    // ── Value + grad ────────────────────────────────────────────────────
+    // ── Norm gradient checks ──────────────────────────────────────────
 
+    #[test]
+    fn test_grad_layer_norm() {
+        // f(x) = sum(layer_norm(x, eps=1e-5))
+        let x_data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+        let f = |x: &Tensor| x.layer_norm(1e-5).sum_all();
+
+        let x = t(&x_data, &[2, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[2, 3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_rms_norm() {
+        // f(x) = sum(rms_norm(x, eps=1e-5))
+        let x_data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+        let f = |x: &Tensor| x.rms_norm(1e-5).sum_all();
+
+        let x = t(&x_data, &[2, 3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[2, 3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_check_layer_norm_1d() {
+        // Single row — edge case
+        let x_data = [1.0, 3.0, 5.0, 7.0];
+
+        let f = |x: &Tensor| x.layer_norm(1e-5).sum_all();
+
+        let x = t(&x_data, &[4]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[4], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_check_rms_norm_1d() {
+        let x_data = [1.0, 3.0, 5.0, 7.0];
+
+        let f = |x: &Tensor| x.rms_norm(1e-5).sum_all();
+
+        let x = t(&x_data, &[4]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[4], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-3, 1e-3);
+    }
+
+    #[test]
+    fn test_grad_layer_norm_chain() {
+        // f(x) = sum(layer_norm(x * 2))  — tests gradient through a chain
+        let x_data = [1.0, 2.0, 3.0];
+        let two = t(&[2.0, 2.0, 2.0], &[3]);
+
+        let f = |x: &Tensor| {
+            let scaled = x.mul(&two)?;
+            scaled.layer_norm(1e-5).sum_all()
+        };
+
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-2, 1e-2);
+    }
+
+    #[test]
+    fn test_grad_rms_norm_chain() {
+        // f(x) = sum(rms_norm(x + 1))
+        let x_data = [1.0, 2.0, 3.0];
+        let one = t(&[1.0, 1.0, 1.0], &[3]);
+
+        let f = |x: &Tensor| {
+            let shifted = x.add(&one)?;
+            shifted.rms_norm(1e-5).sum_all()
+        };
+
+        let x = t(&x_data, &[3]);
+        let analytical = grad(f, &x).unwrap().to_vec_f32().unwrap();
+        let numerical = numerical_grad(&f, &x_data, &[3], 1e-3);
+
+        mlx_conformance::assert_allclose(&analytical, &numerical, 1e-2, 1e-2);
+    }
+
+    // ── Value + grad ────────────────────────────────────────────────────
     #[test]
     fn test_value_and_grad() {
         let x = t(&[2.0, 3.0], &[2]);
         let (val, dx) = value_and_grad(|x| x.mul(x)?.sum_all(), &x).unwrap();
         assert_eq!(val.to_vec_f32().unwrap(), vec![13.0]); // 4 + 9
         mlx_conformance::assert_allclose(&dx.to_vec_f32().unwrap(), &[4.0, 6.0], 1e-5, 1e-5);
+    }
+
+    #[test]
+    fn test_sum_axis_grad_bug() {
+        let x = t(&[1.0, 2.0, 3.0], &[3]);
+        // f(x) = sum(x)
+        // grad(f) should be [1, 1, 1]
+        let g = grad(|x| x.sum_axis(0), &x).expect("grad failed");
+        let vals = g.to_vec_f32().unwrap();
+        assert_eq!(vals, vec![1.0, 1.0, 1.0]);
     }
 }

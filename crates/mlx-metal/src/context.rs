@@ -1,21 +1,43 @@
-use metal::{CommandQueue, Device};
+//! Metal device and command queue context.
 
+use metal::{CommandQueue, Device};
+use std::sync::Arc;
+use tracing::info;
+
+use crate::command::run_add_u32_impl;
+use crate::pipeline::PipelineCache;
 use crate::unified::{HostAllocation, UnifiedBuffer};
 use crate::{MetalError, Result};
 
-/// Owns a Metal device and command queue, and provides factory methods
-/// for creating unified memory buffers.
+/// Shared Metal context: device + command queue.
+#[derive(Clone)]
 pub struct MetalContext {
     device: Device,
     queue: CommandQueue,
+    pipelines: Arc<PipelineCache>,
 }
 
 impl MetalContext {
-    /// Create a context using the system default Metal device.
+    /// Create a new Metal context using the system default device.
     pub fn new() -> Result<Self> {
         let device = Device::system_default().ok_or(MetalError::NoDevice)?;
         let queue = device.new_command_queue();
-        Ok(Self { device, queue })
+        info!(device = %device.name(), "Initialized Metal context");
+        Ok(Self {
+            device,
+            queue,
+            pipelines: Arc::new(PipelineCache::new()),
+        })
+    }
+
+    /// Human-readable device name.
+    pub fn device_name(&self) -> String {
+        self.device.name().to_string()
+    }
+
+    /// Run the trivial add_u32 kernel for smoke testing.
+    pub fn run_add_u32(&self, a: &[u32], b: &[u32]) -> Result<Vec<u32>> {
+        run_add_u32_impl(self, a, b)
     }
 
     /// Create a zero-copy buffer from a page-aligned host allocation.
@@ -40,5 +62,9 @@ impl MetalContext {
 
     pub fn queue(&self) -> &CommandQueue {
         &self.queue
+    }
+
+    pub(crate) fn pipelines(&self) -> &PipelineCache {
+        &self.pipelines
     }
 }

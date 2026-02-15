@@ -35,7 +35,12 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Unary ops preserve shape.
-        OpKind::Neg | OpKind::Silu | OpKind::Gelu | OpKind::Constant | OpKind::Parameter => {
+        OpKind::Neg
+        | OpKind::Silu
+        | OpKind::Gelu
+        | OpKind::Constant
+        | OpKind::Parameter
+        | OpKind::RoPE { .. } => {
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
@@ -65,14 +70,11 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             match axis {
-                None => Ok(Shape::new(vec![1])),
+                None => Ok(Shape::scalar()),
                 Some(ax) => {
                     let resolved = resolve_axis(*ax, a.ndim())?;
                     let mut dims = a.0.clone();
                     dims.remove(resolved);
-                    if dims.is_empty() {
-                        dims.push(1);
-                    }
                     Ok(Shape::new(dims))
                 }
             }
@@ -98,10 +100,38 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Reshape: output shape is specified in the op.
-        OpKind::Reshape { new_shape } => Ok(new_shape.clone()),
+        OpKind::Reshape { new_shape } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            if a.numel() != new_shape.numel() {
+                return Err(ShapeError::Mismatch(format!(
+                    "reshape numel mismatch: {} vs {}",
+                    a.numel(),
+                    new_shape.numel()
+                )));
+            }
+            Ok(new_shape.clone())
+        }
 
         // Broadcast: output shape is the target shape.
         OpKind::Broadcast { target_shape } => Ok(target_shape.clone()),
+
+        // Backward ops: output shape = input shape (must match grad_output shape).
+        OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
+            let grad_output = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing grad_output (input 0)".into()))?;
+            let original_input = inputs.get(1).ok_or(ShapeError::Mismatch(
+                "missing original input (input 1)".into(),
+            ))?;
+            if grad_output.0 != original_input.0 {
+                return Err(ShapeError::Mismatch(
+                    "VJP grad_output and input shapes must match".into(),
+                ));
+            }
+            Ok((*original_input).clone())
+        }
 
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
@@ -109,7 +139,32 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             let perm: Vec<usize> = match axes {
-                Some(ax) => ax.clone(),
+                Some(ax) => {
+                    if ax.len() != a.ndim() {
+                        return Err(ShapeError::Mismatch(format!(
+                            "transpose axes length mismatch: {} vs {}",
+                            ax.len(),
+                            a.ndim()
+                        )));
+                    }
+                    // Validate permutation
+                    let mut seen = vec![false; a.ndim()];
+                    for &x in ax {
+                        if x >= a.ndim() {
+                            return Err(ShapeError::InvalidAxis {
+                                axis: x as i32,
+                                ndim: a.ndim(),
+                            });
+                        }
+                        if seen[x] {
+                            return Err(ShapeError::Mismatch(format!(
+                                "duplicate axis {x} in transpose"
+                            )));
+                        }
+                        seen[x] = true;
+                    }
+                    ax.clone()
+                }
                 None => (0..a.ndim()).rev().collect(),
             };
             let new_dims: Vec<i64> = perm.iter().map(|&ax| a.0[ax]).collect();
@@ -179,7 +234,7 @@ mod tests {
     fn test_sum_all() {
         let a = s(&[2, 3]);
         let result = infer_shape(&OpKind::Sum { axis: None }, &[&a]).unwrap();
-        assert_eq!(result, s(&[1]));
+        assert_eq!(result, Shape::scalar());
     }
 
     #[test]
@@ -249,5 +304,46 @@ mod tests {
         let a = s(&[4, 8]);
         let result = infer_shape(&OpKind::LayerNorm { eps: 1e-5 }, &[&a]).unwrap();
         assert_eq!(result, s(&[4, 8]));
+    }
+
+    #[test]
+    fn test_transpose_validation() {
+        let a = s(&[2, 3]);
+
+        // Missing axis
+        let res = infer_shape(
+            &OpKind::Transpose {
+                axes: Some(vec![0]),
+            },
+            &[&a],
+        );
+        assert!(res.is_err());
+
+        // Duplicate axis
+        let res = infer_shape(
+            &OpKind::Transpose {
+                axes: Some(vec![0, 0]),
+            },
+            &[&a],
+        );
+        assert!(res.is_err());
+
+        // Out of bounds axis
+        let res = infer_shape(
+            &OpKind::Transpose {
+                axes: Some(vec![0, 5]),
+            },
+            &[&a],
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_reshape_validation() {
+        let a = s(&[2, 3]); // numel = 6
+        let new_shape = s(&[2, 4]); // numel = 8
+
+        let res = infer_shape(&OpKind::Reshape { new_shape }, &[&a]);
+        assert!(res.is_err());
     }
 }

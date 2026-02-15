@@ -5,11 +5,25 @@ edition.workspace = true
 license.workspace = true
 description = "Native Metal backend for Apple Silicon GPU acceleration"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+tracing = { workspace = true }
 thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.33"
 block = "0.1"
 libc = "0.2"
+
+[dev-dependencies]
+smallvec = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.9"
+tracing-subscriber = { workspace = true }
+
+[[bench]]
+name = "gemm"
+harness = false

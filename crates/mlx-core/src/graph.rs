@@ -85,6 +85,24 @@ pub enum OpKind {
     Broadcast {
         target_shape: Shape,
     },
+
+    // ── Backward (VJP) ops ──────────────────────────────────────────
+    /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
+    LayerNormVjp {
+        eps: f32,
+    },
+    /// RmsNorm backward: inputs = [grad_output, input], produces grad_input.
+    RmsNormVjp {
+        eps: f32,
+    },
+
+    // ── Rotary Positional Embeddings ───────────────────────────────────
+    #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
+    RoPE {
+        base: f32,
+        offset: usize,
+        traditional: bool,
+    },
 }
 
 /// The computation graph arena.
