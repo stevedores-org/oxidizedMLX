@@ -1,7 +1,35 @@
 //! Native Metal backend for Apple Silicon GPU acceleration.
 //!
-//! Replaces the MLX C++ Metal runtime with a Rust-native implementation
-//! using `metal-rs` / `objc2`. Includes command queue management, pipeline
-//! cache, and buffer allocation for unified memory.
+//! Provides a unified memory buffer model that enables zero-copy CPU/GPU
+//! sharing on Apple Silicon via Metal's `newBufferWithBytesNoCopy`.
 
-// TODO(milestone-6): implement Metal runtime scaffolding
+#[cfg(target_os = "macos")]
+pub mod context;
+#[cfg(target_os = "macos")]
+pub mod instrument;
+#[cfg(target_os = "macos")]
+pub mod unified;
+
+#[cfg(target_os = "macos")]
+pub use context::MetalContext;
+#[cfg(target_os = "macos")]
+pub use instrument::BufferTelemetry;
+#[cfg(target_os = "macos")]
+pub use unified::{HostAllocation, UnifiedBuffer};
+
+/// Errors arising from Metal buffer operations.
+#[derive(Debug, thiserror::Error)]
+pub enum MetalError {
+    #[error("no Metal device found")]
+    NoDevice,
+    #[error("buffer creation failed: {0}")]
+    BufferCreationFailed(String),
+    #[error("GPU command buffer is in flight; mutable host access denied")]
+    GpuInFlight,
+    #[error("host pointer is not page-aligned")]
+    NotPageAligned,
+    #[error("zero-length buffer is not permitted")]
+    ZeroLength,
+}
+
+pub type Result<T> = std::result::Result<T, MetalError>;
