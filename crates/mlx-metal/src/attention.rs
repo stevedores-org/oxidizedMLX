@@ -73,11 +73,7 @@ impl MetalBackend {
             MTLResourceOptions::StorageModeShared,
         );
 
-        let pipeline = self
-            .ctx
-            .pipelines()
-            .get_softmax_masked_f32(device)
-            ?;
+        let pipeline = self.ctx.pipelines().get_softmax_masked_f32(device)?;
 
         let queue = self.ctx.queue();
         let cmd_buf = queue.new_command_buffer();
@@ -158,21 +154,14 @@ impl MetalBackend {
             MTLResourceOptions::StorageModeShared,
         );
 
-        let transpose_params = TransposeParams {
-            rows: tk,
-            cols: dh,
-        };
+        let transpose_params = TransposeParams { rows: tk, cols: dh };
         let transpose_params_buf = device.new_buffer_with_data(
             &transpose_params as *const _ as *const _,
             std::mem::size_of::<TransposeParams>() as u64,
             MTLResourceOptions::StorageModeShared,
         );
 
-        let transpose_pipeline = self
-            .ctx
-            .pipelines()
-            .get_transpose_f32(device)
-            ?;
+        let transpose_pipeline = self.ctx.pipelines().get_transpose_f32(device)?;
 
         let cmd_buf = queue.new_command_buffer();
 
@@ -206,11 +195,7 @@ impl MetalBackend {
             MTLResourceOptions::StorageModeShared,
         );
 
-        let gemm_pipeline = self
-            .ctx
-            .pipelines()
-            .get_tiled_gemm_f32(device)
-            ?;
+        let gemm_pipeline = self.ctx.pipelines().get_tiled_gemm_f32(device)?;
 
         let encoder = cmd_buf.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&gemm_pipeline);
@@ -219,8 +204,7 @@ impl MetalBackend {
         encoder.set_buffer(2, Some(&scores_buf), 0);
         encoder.set_buffer(3, Some(&gemm1_params_buf), 0);
 
-        let thread_groups =
-            MTLSize::new((tk as u64).div_ceil(16), (tq as u64).div_ceil(16), 1);
+        let thread_groups = MTLSize::new((tk as u64).div_ceil(16), (tq as u64).div_ceil(16), 1);
         let threads_per_group = MTLSize::new(16, 16, 1);
         encoder.dispatch_thread_groups(thread_groups, threads_per_group);
         encoder.end_encoding();
@@ -243,11 +227,7 @@ impl MetalBackend {
             MTLResourceOptions::StorageModeShared,
         );
 
-        let softmax_pipeline = self
-            .ctx
-            .pipelines()
-            .get_softmax_masked_f32(device)
-            ?;
+        let softmax_pipeline = self.ctx.pipelines().get_softmax_masked_f32(device)?;
 
         let encoder = cmd_buf.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&softmax_pipeline);
@@ -284,8 +264,7 @@ impl MetalBackend {
         encoder.set_buffer(2, Some(&out_buf), 0);
         encoder.set_buffer(3, Some(&gemm2_params_buf), 0);
 
-        let thread_groups =
-            MTLSize::new((dh as u64).div_ceil(16), (tq as u64).div_ceil(16), 1);
+        let thread_groups = MTLSize::new((dh as u64).div_ceil(16), (tq as u64).div_ceil(16), 1);
         encoder.dispatch_thread_groups(thread_groups, threads_per_group);
         encoder.end_encoding();
 

@@ -40,6 +40,7 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         | OpKind::Gelu
         | OpKind::Constant
         | OpKind::Parameter
+        | OpKind::Rope { .. }
         | OpKind::RoPE { .. } => {
             let a = inputs
                 .first()
@@ -172,9 +173,7 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .get(2)
                 .ok_or(ShapeError::Mismatch("missing V (input 2)".into()))?;
             if q.ndim() != 2 || k.ndim() != 2 || v.ndim() != 2 {
-                return Err(ShapeError::Mismatch(
-                    "Attention inputs must be 2D".into(),
-                ));
+                return Err(ShapeError::Mismatch("Attention inputs must be 2D".into()));
             }
             let tq = q.0[0];
             let dh = q.0[1];
@@ -184,17 +183,20 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             let dh_v = v.0[1];
             if dh != dh_k {
                 return Err(ShapeError::Mismatch(format!(
-                    "Q head_dim {} != K head_dim {}", dh, dh_k
+                    "Q head_dim {} != K head_dim {}",
+                    dh, dh_k
                 )));
             }
             if tk != tk_v {
                 return Err(ShapeError::Mismatch(format!(
-                    "K seq_len {} != V seq_len {}", tk, tk_v
+                    "K seq_len {} != V seq_len {}",
+                    tk, tk_v
                 )));
             }
             if dh != dh_v {
                 return Err(ShapeError::Mismatch(format!(
-                    "Q head_dim {} != V head_dim {}", dh, dh_v
+                    "Q head_dim {} != V head_dim {}",
+                    dh, dh_v
                 )));
             }
             Ok(Shape::new(vec![tq, dh]))

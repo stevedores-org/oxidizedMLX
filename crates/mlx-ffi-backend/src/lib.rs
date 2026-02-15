@@ -298,11 +298,10 @@ impl Backend for MlxFfiBackend {
             | OpKind::RmsNormVjp { .. }
             | OpKind::ScaledMaskedSoftmax { .. }
             | OpKind::Attention { .. }
-            | OpKind::RoPE { .. } => {
-                Err(MlxError::InvalidArgument(format!(
-                    "{op:?} not supported by FFI backend",
-                )))
-            }
+            | OpKind::Rope { .. }
+            | OpKind::RoPE { .. } => Err(MlxError::InvalidArgument(format!(
+                "{op:?} not supported by FFI backend",
+            ))),
             OpKind::Constant | OpKind::Parameter => Err(MlxError::InvalidArgument(
                 "Constant/Parameter should be pre-materialized by Stream".into(),
             )),

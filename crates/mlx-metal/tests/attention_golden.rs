@@ -7,7 +7,13 @@ mod metal_tests {
     use mlx_metal::metal_stream;
 
     /// CPU reference: scaled masked softmax.
-    fn cpu_scaled_masked_softmax(scores: &[f32], tq: usize, tk: usize, scale: f32, causal: bool) -> Vec<f32> {
+    fn cpu_scaled_masked_softmax(
+        scores: &[f32],
+        tq: usize,
+        tk: usize,
+        scale: f32,
+        causal: bool,
+    ) -> Vec<f32> {
         let mut data = vec![0.0f32; tq * tk];
         for i in 0..tq {
             for j in 0..tk {
@@ -65,7 +71,16 @@ mod metal_tests {
 
     /// CPU reference: full attention.
     #[allow(clippy::too_many_arguments)]
-    fn cpu_attention(q: &[f32], k: &[f32], v: &[f32], tq: usize, tk: usize, dh: usize, scale: f32, causal: bool) -> Vec<f32> {
+    fn cpu_attention(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        tq: usize,
+        tk: usize,
+        dh: usize,
+        scale: f32,
+        causal: bool,
+    ) -> Vec<f32> {
         let kt = cpu_transpose(k, tk, dh);
         let scores = cpu_matmul(q, &kt, tq, dh, tk);
         let probs = cpu_scaled_masked_softmax(&scores, tq, tk, scale, causal);
@@ -87,7 +102,9 @@ mod metal_tests {
 
     /// Deterministic test data.
     fn gen_data(n: usize, seed: f32) -> Vec<f32> {
-        (0..n).map(|i| ((i as f32 + seed) * 0.01).sin() * 0.5).collect()
+        (0..n)
+            .map(|i| ((i as f32 + seed) * 0.01).sin() * 0.5)
+            .collect()
     }
 
     // ── ScaledMaskedSoftmax tests ──
@@ -104,12 +121,21 @@ mod metal_tests {
 
         let s = stream.add_constant(
             scores,
-            TensorMeta { shape: Shape::new(vec![tq as i64, tk as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tq as i64, tk as i64]),
+                dtype: DType::F32,
+            },
         );
         let out = stream.add_op(
-            OpKind::ScaledMaskedSoftmax { scale, causal: true },
+            OpKind::ScaledMaskedSoftmax {
+                scale,
+                causal: true,
+            },
             smallvec::SmallVec::from_slice(&[s]),
-            TensorMeta { shape: Shape::new(vec![tq as i64, tk as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tq as i64, tk as i64]),
+                dtype: DType::F32,
+            },
         );
 
         stream.eval(out).expect("eval");
@@ -130,12 +156,21 @@ mod metal_tests {
 
         let s = stream.add_constant(
             scores,
-            TensorMeta { shape: Shape::new(vec![tq as i64, tk as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tq as i64, tk as i64]),
+                dtype: DType::F32,
+            },
         );
         let out = stream.add_op(
-            OpKind::ScaledMaskedSoftmax { scale, causal: true },
+            OpKind::ScaledMaskedSoftmax {
+                scale,
+                causal: true,
+            },
             smallvec::SmallVec::from_slice(&[s]),
-            TensorMeta { shape: Shape::new(vec![tq as i64, tk as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tq as i64, tk as i64]),
+                dtype: DType::F32,
+            },
         );
 
         stream.eval(out).expect("eval");
@@ -168,20 +203,32 @@ mod metal_tests {
 
         let q = stream.add_constant(
             q_data,
-            TensorMeta { shape: Shape::new(vec![tq as i64, dh as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tq as i64, dh as i64]),
+                dtype: DType::F32,
+            },
         );
         let k = stream.add_constant(
             k_data,
-            TensorMeta { shape: Shape::new(vec![tk as i64, dh as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tk as i64, dh as i64]),
+                dtype: DType::F32,
+            },
         );
         let v = stream.add_constant(
             v_data,
-            TensorMeta { shape: Shape::new(vec![tk as i64, dh as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tk as i64, dh as i64]),
+                dtype: DType::F32,
+            },
         );
         let out = stream.add_op(
             OpKind::Attention { scale, causal },
             smallvec::SmallVec::from_slice(&[q, k, v]),
-            TensorMeta { shape: Shape::new(vec![tq as i64, dh as i64]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![tq as i64, dh as i64]),
+                dtype: DType::F32,
+            },
         );
 
         stream.eval(out).expect("eval");
@@ -216,24 +263,42 @@ mod metal_tests {
         // Mismatched head dimensions: Q [4, 16], K [4, 8], V [4, 8]
         let q = stream.add_constant(
             vec![0.0f32; 4 * 16],
-            TensorMeta { shape: Shape::new(vec![4, 16]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![4, 16]),
+                dtype: DType::F32,
+            },
         );
         let k = stream.add_constant(
             vec![0.0f32; 4 * 8],
-            TensorMeta { shape: Shape::new(vec![4, 8]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![4, 8]),
+                dtype: DType::F32,
+            },
         );
         let v = stream.add_constant(
             vec![0.0f32; 4 * 8],
-            TensorMeta { shape: Shape::new(vec![4, 8]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![4, 8]),
+                dtype: DType::F32,
+            },
         );
         let out = stream.add_op(
-            OpKind::Attention { scale: 0.25, causal: true },
+            OpKind::Attention {
+                scale: 0.25,
+                causal: true,
+            },
             smallvec::SmallVec::from_slice(&[q, k, v]),
-            TensorMeta { shape: Shape::new(vec![4, 16]), dtype: DType::F32 },
+            TensorMeta {
+                shape: Shape::new(vec![4, 16]),
+                dtype: DType::F32,
+            },
         );
 
         let result = stream.eval(out);
-        assert!(result.is_err(), "should fail with mismatched head dimensions");
+        assert!(
+            result.is_err(),
+            "should fail with mismatched head dimensions"
+        );
     }
 }
 

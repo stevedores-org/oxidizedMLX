@@ -82,6 +82,15 @@ pub enum OpKind {
         eps: f32,
     },
 
+    // ── Positional encoding ────────────────────────────────────────────
+    /// Rotary positional embeddings (RoPE).
+    /// Applied in-place to interleaved pairs of the last dimension.
+    Rope {
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta: f32,
+    },
+
     // ── Broadcasting ──────────────────────────────────────────────────
     /// Broadcast a tensor to a target shape (numpy-style rules).
     Broadcast {
@@ -91,12 +100,18 @@ pub enum OpKind {
     // ── Attention ──────────────────────────────────────────────────
     /// Fused scale + causal-mask + softmax along last axis.
     /// Input: scores [Tq, Tk], output: probs [Tq, Tk]
-    ScaledMaskedSoftmax { scale: f32, causal: bool },
+    ScaledMaskedSoftmax {
+        scale: f32,
+        causal: bool,
+    },
 
     /// Full single-head attention composition.
     /// Inputs: [Q, K, V] where Q=[Tq,Dh], K=[Tk,Dh], V=[Tk,Dh]
     /// Output: Y=[Tq,Dh]
-    Attention { scale: f32, causal: bool },
+    Attention {
+        scale: f32,
+        causal: bool,
+    },
 
     // ── Backward (VJP) ops ──────────────────────────────────────────
     /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
@@ -278,23 +293,60 @@ enum OpKey {
     Mul,
     Div,
     Neg,
-    Sum { axis: Option<i32> },
-    Mean { axis: Option<i32> },
-    Max { axis: Option<i32> },
+    Sum {
+        axis: Option<i32>,
+    },
+    Mean {
+        axis: Option<i32>,
+    },
+    Max {
+        axis: Option<i32>,
+    },
     MatMul,
-    Reshape { new_shape: Vec<i64> },
-    Transpose { axes: Option<Vec<usize>> },
-    Softmax { axis: i32 },
+    Reshape {
+        new_shape: Vec<i64>,
+    },
+    Transpose {
+        axes: Option<Vec<usize>>,
+    },
+    Softmax {
+        axis: i32,
+    },
     Silu,
     Gelu,
-    LayerNorm { eps_bits: u32 },
-    RmsNorm { eps_bits: u32 },
-    Broadcast { target_shape: Vec<i64> },
-    LayerNormVjp { eps_bits: u32 },
-    RmsNormVjp { eps_bits: u32 },
-    ScaledMaskedSoftmax { scale_bits: u32, causal: bool },
-    Attention { scale_bits: u32, causal: bool },
-    RoPE { base_bits: u32, offset: usize, traditional: bool },
+    LayerNorm {
+        eps_bits: u32,
+    },
+    RmsNorm {
+        eps_bits: u32,
+    },
+    Broadcast {
+        target_shape: Vec<i64>,
+    },
+    LayerNormVjp {
+        eps_bits: u32,
+    },
+    RmsNormVjp {
+        eps_bits: u32,
+    },
+    ScaledMaskedSoftmax {
+        scale_bits: u32,
+        causal: bool,
+    },
+    Attention {
+        scale_bits: u32,
+        causal: bool,
+    },
+    Rope {
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta_bits: u32,
+    },
+    RoPE {
+        base_bits: u32,
+        offset: usize,
+        traditional: bool,
+    },
 }
 
 impl OpKey {
@@ -341,7 +393,20 @@ impl OpKey {
                 scale_bits: scale.to_bits(),
                 causal: *causal,
             },
-            OpKind::RoPE { base, offset, traditional } => OpKey::RoPE {
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
+            } => OpKey::Rope {
+                rotary_dim: *rotary_dim,
+                pos_offset: *pos_offset,
+                theta_bits: theta.to_bits(),
+            },
+            OpKind::RoPE {
+                base,
+                offset,
+                traditional,
+            } => OpKey::RoPE {
                 base_bits: base.to_bits(),
                 offset: *offset,
                 traditional: *traditional,
