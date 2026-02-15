@@ -277,12 +277,19 @@ impl Tensor {
                         "transpose axes length must match ndim".into(),
                     ));
                 }
+                let mut seen = vec![false; ndim];
                 for &axis in ax {
                     if axis >= ndim {
                         return Err(MlxError::InvalidArgument(format!(
                             "transpose axis {axis} out of range for ndim {ndim}"
                         )));
                     }
+                    if seen[axis] {
+                        return Err(MlxError::InvalidArgument(format!(
+                            "duplicate transpose axis {axis} in axes; expected a permutation of 0..{ndim}"
+                        )));
+                    }
+                    seen[axis] = true;
                 }
                 ax.to_vec()
             }
@@ -675,7 +682,16 @@ mod tests {
     fn test_reduce_zero_dim_bug() {
         let x = Tensor::from_f32(&[], &Shape::new(vec![2, 3, 0]), &cpu()).unwrap();
         let s = x.sum_axis(1).unwrap(); // Should return shape [2, 0]
-        assert_eq!(s.shape().0, vec![2, 0]);
+        assert_eq!(s.shape(), &Shape::new(vec![2, 0]));
+        let vals = s.to_vec_f32().unwrap();
+        assert_eq!(vals.len(), 0);
+    }
+
+    #[test]
+    fn test_softmax_zero_trailing_dim() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 3, 0]), &cpu()).unwrap();
+        let s = x.softmax(1).unwrap();
+        assert_eq!(s.shape(), &Shape::new(vec![2, 3, 0]));
         let vals = s.to_vec_f32().unwrap();
         assert_eq!(vals.len(), 0);
     }
