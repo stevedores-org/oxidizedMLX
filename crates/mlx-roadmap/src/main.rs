@@ -80,6 +80,8 @@ fn main() -> Result<(), Error> {
 }
 
 fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
+    const MAX_ATTEMPTS: usize = 15;
+
     let repo = match repo {
         Some(s) => parse_repo_slug(&s)?,
         None => infer_repo_from_git_remote()?,
@@ -89,7 +91,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
 
     let existing_labels: Vec<Label> = gh_json_with_retries(
         &["api", &format!("repos/{}/labels?per_page=100", repo.slug())],
-        5,
+        MAX_ATTEMPTS,
     )?;
     let existing_label_names: std::collections::BTreeSet<String> =
         existing_labels.into_iter().map(|l| l.name).collect();
@@ -116,7 +118,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 "-f",
                 &format!("description={}", l.description),
             ],
-            5,
+            MAX_ATTEMPTS,
         )?;
         created_labels.push(l.name.to_string());
     }
@@ -126,7 +128,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
             "api",
             &format!("repos/{}/milestones?state=all&per_page=100", repo.slug()),
         ],
-        5,
+        MAX_ATTEMPTS,
     )?;
     let mut milestones_by_title: std::collections::BTreeMap<String, Milestone> =
         existing_milestones
@@ -154,7 +156,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 "-f",
                 &format!("description={}", m.description),
             ],
-            5,
+            MAX_ATTEMPTS,
         )?;
         created_milestones.push(created.title.clone());
         milestones_by_title.insert(created.title.clone(), created);
@@ -173,7 +175,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 "-f",
                 "per_page=5",
             ],
-            5,
+            MAX_ATTEMPTS,
         )?;
         if search.total_count > 0 {
             continue;
@@ -202,6 +204,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
         }
 
         let issue: Issue = gh_json_with_retries_owned(args, 5)?;
+        let issue: Issue = gh_json_with_retries_owned(args, MAX_ATTEMPTS)?;
 
         // Apply labels.
         if !epic.labels.is_empty() {
@@ -215,7 +218,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 lab_args.push("-f".to_string());
                 lab_args.push(format!("labels[]={}", lbl));
             }
-            gh_with_retries_owned(lab_args, 5)?;
+            gh_with_retries_owned(lab_args, MAX_ATTEMPTS)?;
         }
 
         created_issues.push(format!("{} (#{})", epic.title, issue.number));
@@ -545,8 +548,18 @@ fn gh_with_retries_owned(args: Vec<String>, max_attempts: usize) -> Result<Vec<u
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let combined = format!("{stdout}{stderr}");
         if attempt < max_attempts && is_transient_gh_error(&combined) {
-            std::thread::sleep(Duration::from_millis(400 * attempt as u64));
+            // Exponential backoff with deterministic jitter.
+            // (No RNG dependency; this is just to avoid hammering.)
+            let base_ms = 250u64.saturating_mul(1u64 << attempt.min(6));
+            let jitter_ms = (attempt as u64 * 137) % 200;
+            let sleep_ms = (base_ms + jitter_ms).min(30_000);
+            std::thread::sleep(Duration::from_millis(sleep_ms));
             continue;
+        }
+        if is_transient_gh_error(&combined) {
+            return Err(Error::Gh(format!(
+                "{combined}\n(transient GitHub API connectivity error; retry again in a few seconds)"
+            )));
         }
         return Err(Error::Gh(combined));
     }
