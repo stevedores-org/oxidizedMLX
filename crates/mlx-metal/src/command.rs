@@ -1,7 +1,7 @@
 //! Command encoding helpers.
 
-use mlx_core::{MlxError, Result};
 use metal::{MTLCommandBufferStatus, MTLSize};
+use mlx_core::{MlxError, Result};
 
 use crate::buffers::MetalBuffer;
 use crate::context::MetalContext;
@@ -33,8 +33,8 @@ pub(crate) fn run_add_u32_impl(ctx: &MetalContext, a: &[u32], b: &[u32]) -> Resu
     encoder.set_buffer(2, Some(out_buf.raw()), 0);
 
     let width = a.len() as u64;
-    let tew = pipeline.thread_execution_width() as u64;
-    let max_threads = pipeline.max_total_threads_per_threadgroup() as u64;
+    let tew = pipeline.thread_execution_width();
+    let max_threads = pipeline.max_total_threads_per_threadgroup();
     let threads_per_group = tew.min(max_threads).max(1).min(width);
 
     encoder.dispatch_threads(
