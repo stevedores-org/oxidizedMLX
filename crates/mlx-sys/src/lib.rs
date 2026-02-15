@@ -162,8 +162,8 @@ mod tests {
             #[cfg(target_os = "macos")]
             assert_eq!(
                 dt,
-                mlx_device_type_t::GPU,
-                "Apple Silicon should default to GPU"
+                mlx_device_type_t::CPU,
+                "default device should match mlx-core (CPU)"
             );
             #[cfg(not(target_os = "macos"))]
             assert_eq!(
