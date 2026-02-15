@@ -67,6 +67,25 @@ pub unsafe extern "C" fn mlxrs_default_device() -> *mut mlx_device_t {
     box_device(Device::default_device())
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_device_type(d: *mut mlx_device_t) -> crate::mlx_device_type_t {
+    let dev = unsafe { ref_device(d) };
+    match dev {
+        Device::Cpu => crate::mlx_device_type_t::CPU,
+        Device::Gpu => crate::mlx_device_type_t::GPU,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_cpu_device() -> *mut mlx_device_t {
+    box_device(Device::Cpu)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mlxrs_gpu_device() -> *mut mlx_device_t {
+    box_device(Device::Gpu)
+}
+
 // ── Tensor creation ─────────────────────────────────────────────────────
 
 #[unsafe(no_mangle)]
