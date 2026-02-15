@@ -32,7 +32,7 @@ struct NormParams {
 }
 
 pub struct MetalBackend {
-    ctx: Arc<MetalContext>,
+    pub(crate) ctx: Arc<MetalContext>,
 }
 
 // SAFETY: MetalBackend holds an Arc<MetalContext> containing metal::Device and
@@ -50,7 +50,7 @@ impl MetalBackend {
         })
     }
 
-    fn data_to_buffer(&self, data: &[f32]) -> Result<metal::Buffer> {
+    pub(crate) fn data_to_buffer(&self, data: &[f32]) -> Result<metal::Buffer> {
         let device = self.ctx.device();
         let mut byte_len = std::mem::size_of_val(data) as u64;
         if byte_len == 0 {
@@ -496,8 +496,17 @@ impl Backend for MetalBackend {
             OpKind::Gelu => self.eval_elementwise_unary(inputs, meta, "gelu"),
             OpKind::Transpose { axes } => self.eval_transpose(inputs, meta, axes),
             OpKind::MatMul => self.eval_matmul(inputs, meta),
+<<<<<<< HEAD
             OpKind::LayerNorm { eps } => self.eval_layer_norm(inputs, meta, *eps),
             OpKind::RmsNorm { eps } => self.eval_rms_norm(inputs, meta, *eps),
+=======
+            OpKind::ScaledMaskedSoftmax { scale, causal } => {
+                self.eval_scaled_masked_softmax(inputs, meta, *scale, *causal)
+            }
+            OpKind::Attention { scale, causal } => {
+                self.eval_attention(inputs, meta, *scale, *causal)
+            }
+>>>>>>> origin/develop
             OpKind::Rope {
                 rotary_dim,
                 pos_offset,

@@ -99,6 +99,22 @@ pub enum OpKind {
         target_shape: Shape,
     },
 
+    // ── Attention ──────────────────────────────────────────────────
+    /// Fused scale + causal-mask + softmax along last axis.
+    /// Input: scores [Tq, Tk], output: probs [Tq, Tk]
+    ScaledMaskedSoftmax {
+        scale: f32,
+        causal: bool,
+    },
+
+    /// Full single-head attention composition.
+    /// Inputs: [Q, K, V] where Q=[Tq,Dh], K=[Tk,Dh], V=[Tk,Dh]
+    /// Output: Y=[Tq,Dh]
+    Attention {
+        scale: f32,
+        causal: bool,
+    },
+
     // ── Backward (VJP) ops ──────────────────────────────────────────
     /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
     LayerNormVjp {
@@ -108,6 +124,29 @@ pub enum OpKind {
     RmsNormVjp {
         eps: f32,
     },
+<<<<<<< HEAD
+=======
+    /// Softmax backward: inputs = [grad_output, softmax_output], produces grad_input.
+    SoftmaxVjp {
+        axis: i32,
+    },
+    /// SiLU backward: inputs = [grad_output, original_input], produces grad_input.
+    SiluVjp,
+    /// GELU backward: inputs = [grad_output, original_input], produces grad_input.
+    GeluVjp,
+
+    // ── Elementwise (misc) ──────────────────────────────────────────
+    /// Element-wise square root.
+    Sqrt,
+
+    // ── Rotary Positional Embeddings ───────────────────────────────────
+    #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
+    RoPE {
+        base: f32,
+        offset: usize,
+        traditional: bool,
+    },
+>>>>>>> origin/develop
 }
 
 /// The computation graph arena.
@@ -271,15 +310,33 @@ enum OpKey {
     Mul,
     Div,
     Neg,
+<<<<<<< HEAD
     Exp,
     Log,
     Sum { axis: Option<i32> },
     Mean { axis: Option<i32> },
     Max { axis: Option<i32> },
+=======
+    Sum {
+        axis: Option<i32>,
+    },
+    Mean {
+        axis: Option<i32>,
+    },
+    Max {
+        axis: Option<i32>,
+    },
+>>>>>>> origin/develop
     MatMul,
-    Reshape { new_shape: Vec<i64> },
-    Transpose { axes: Option<Vec<usize>> },
-    Softmax { axis: i32 },
+    Reshape {
+        new_shape: Vec<i64>,
+    },
+    Transpose {
+        axes: Option<Vec<usize>>,
+    },
+    Softmax {
+        axis: i32,
+    },
     Silu,
     Gelu,
     LayerNorm { eps_bits: u32 },
@@ -287,11 +344,22 @@ enum OpKey {
     Broadcast { target_shape: Vec<i64> },
     LayerNormVjp { eps_bits: u32 },
     RmsNormVjp { eps_bits: u32 },
+<<<<<<< HEAD
     Rope {
         rotary_dim: usize,
         pos_offset: usize,
         theta_bits: u32,
     },
+=======
+    ScaledMaskedSoftmax { scale_bits: u32, causal: bool },
+    Attention { scale_bits: u32, causal: bool },
+    Rope { rotary_dim: usize, pos_offset: usize, theta_bits: u32 },
+    RoPE { base_bits: u32, offset: usize, traditional: bool },
+    SoftmaxVjp { axis: i32 },
+    SiluVjp,
+    GeluVjp,
+    Sqrt,
+>>>>>>> origin/develop
 }
 
 impl OpKey {
@@ -332,15 +400,39 @@ impl OpKey {
             OpKind::RmsNormVjp { eps } => OpKey::RmsNormVjp {
                 eps_bits: eps.to_bits(),
             },
+<<<<<<< HEAD
             OpKind::Rope {
                 rotary_dim,
                 pos_offset,
                 theta,
             } => OpKey::Rope {
+=======
+            OpKind::ScaledMaskedSoftmax { scale, causal } => OpKey::ScaledMaskedSoftmax {
+                scale_bits: scale.to_bits(),
+                causal: *causal,
+            },
+            OpKind::Attention { scale, causal } => OpKey::Attention {
+                scale_bits: scale.to_bits(),
+                causal: *causal,
+            },
+            OpKind::Rope { rotary_dim, pos_offset, theta } => OpKey::Rope {
+>>>>>>> origin/develop
                 rotary_dim: *rotary_dim,
                 pos_offset: *pos_offset,
                 theta_bits: theta.to_bits(),
             },
+<<<<<<< HEAD
+=======
+            OpKind::RoPE { base, offset, traditional } => OpKey::RoPE {
+                base_bits: base.to_bits(),
+                offset: *offset,
+                traditional: *traditional,
+            },
+            OpKind::SoftmaxVjp { axis } => OpKey::SoftmaxVjp { axis: *axis },
+            OpKind::SiluVjp => OpKey::SiluVjp,
+            OpKind::GeluVjp => OpKey::GeluVjp,
+            OpKind::Sqrt => OpKey::Sqrt,
+>>>>>>> origin/develop
         }
     }
 }
