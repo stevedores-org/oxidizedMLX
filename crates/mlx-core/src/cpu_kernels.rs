@@ -799,12 +799,22 @@ fn embedding(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
             "Embedding weight must be 2D [vocab_size, embed_dim]".into(),
         ));
     }
+    if indices.shape.ndim() != 1 {
+        return Err(MlxError::InvalidArgument(
+            "Embedding indices must be 1D [seq_len]".into(),
+        ));
+    }
     let vocab_size = weight.shape.0[0] as usize;
     let embed_dim = weight.shape.0[1] as usize;
     let seq_len = indices.data.len();
 
     let mut result = Vec::with_capacity(seq_len * embed_dim);
     for &idx_f in indices.data {
+        if idx_f < 0.0 || idx_f != idx_f.trunc() {
+            return Err(MlxError::InvalidArgument(format!(
+                "Embedding index must be a non-negative integer, got {idx_f}"
+            )));
+        }
         let idx = idx_f as usize;
         if idx >= vocab_size {
             return Err(MlxError::InvalidArgument(format!(

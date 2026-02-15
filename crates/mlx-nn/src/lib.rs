@@ -147,6 +147,28 @@ mod tests {
     }
 
     #[test]
+    fn test_dropout_full_drop() {
+        let drop = Dropout::new(1.0);
+        let x = Tensor::from_f32(&[1.0, 2.0, 3.0], &s(&[3]), &cpu()).unwrap();
+        let y = drop.forward(&x).unwrap();
+        let result = y.to_vec_f32().unwrap();
+        mlx_conformance::assert_allclose(&result, &[0.0, 0.0, 0.0], 1e-5, 1e-5);
+    }
+
+    #[test]
+    fn test_embedding_negative_index() {
+        let weight =
+            Tensor::from_f32(&[10.0, 11.0, 20.0, 21.0], &s(&[2, 2]), &cpu()).unwrap();
+        let emb = Embedding::new(weight);
+        let indices = Tensor::from_f32(&[-1.0], &s(&[1]), &cpu()).unwrap();
+        // forward() builds a lazy graph node (Ok), but the negative index
+        // validation fires at eval time when the CPU kernel runs.
+        let y = emb.forward(&indices).unwrap();
+        let result = y.to_vec_f32();
+        assert!(result.is_err(), "negative index should fail at eval time");
+    }
+
+    #[test]
     fn test_rms_norm() {
         let rn = RmsNorm::new(3, 1e-5);
         let x = Tensor::from_f32(&[1.0, 2.0, 3.0], &s(&[1, 3]), &cpu()).unwrap();

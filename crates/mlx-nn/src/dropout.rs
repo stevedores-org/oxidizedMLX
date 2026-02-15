@@ -37,6 +37,12 @@ impl Module for Dropout {
         if !self.training || self.p == 0.0 {
             return Ok(input.clone());
         }
+        if self.p >= 1.0 {
+            return Tensor::zeros(input.shape(), input.dtype(), input.device());
+        }
+        // Note: the mask is generated eagerly (not as a graph op), so this
+        // allocates even if the result tensor is never evaluated. A graph-level
+        // random op would preserve full laziness but is not yet implemented.
         let n = input.numel() as usize;
         let mut rng = rand::rng();
         let scale = 1.0 / (1.0 - self.p);

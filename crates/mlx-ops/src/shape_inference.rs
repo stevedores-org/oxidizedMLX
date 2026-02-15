@@ -235,13 +235,20 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         // Narrow: slice along axis
         OpKind::Narrow {
             axis,
-            start: _,
+            start,
             length,
         } => {
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             let resolved = resolve_axis(*axis, a.ndim())?;
+            let dim_size = a.0[resolved];
+            if *start < 0 || start + length > dim_size {
+                return Err(ShapeError::Mismatch(format!(
+                    "Narrow: start {} + length {} exceeds dim size {}",
+                    start, length, dim_size
+                )));
+            }
             let mut dims = a.0.clone();
             dims[resolved] = *length;
             Ok(Shape::new(dims))

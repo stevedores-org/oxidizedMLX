@@ -38,7 +38,9 @@ impl MultiHeadAttention {
         }
     }
 
-    /// Forward pass with causal masking (auto-regressive).
+    // TODO: add cross-attention variant that accepts separate key/value inputs.
+
+    /// Forward pass with causal masking (self-attention, auto-regressive).
     ///
     /// `x` has shape `[seq_len, model_dim]`.
     /// Returns `[seq_len, model_dim]`.
@@ -73,7 +75,8 @@ impl MultiHeadAttention {
         ]))?;
         let v = v.transpose(Some(&[1, 0, 2]))?;
 
-        // Per-head attention using narrow to extract each head, then the fused Attention op
+        // Per-head attention using narrow to extract each head, then the fused Attention op.
+        // TODO: replace with a batched attention op to avoid O(n_heads) graph nodes.
         let mut head_outputs = Vec::with_capacity(self.n_heads);
         for h in 0..self.n_heads {
             let q_h = q.narrow(0, h as i64, 1)?; // [1, seq, head_dim]

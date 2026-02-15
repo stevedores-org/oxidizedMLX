@@ -673,10 +673,16 @@ impl Tensor {
         }
         let tq = self.shape.0[0];
         let dh = self.shape.0[1];
-        if k.shape.0[1] != dh || v.shape.0[1] != dh || k.shape.0[0] != v.shape.0[0] {
+        if k.shape.0[1] != dh {
             return Err(MlxError::ShapeMismatch {
                 expected: self.shape.0.clone(),
                 got: k.shape.0.clone(),
+            });
+        }
+        if v.shape.0[1] != dh || k.shape.0[0] != v.shape.0[0] {
+            return Err(MlxError::ShapeMismatch {
+                expected: k.shape.0.clone(),
+                got: v.shape.0.clone(),
             });
         }
         Ok(self.lazy_op(
