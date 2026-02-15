@@ -44,6 +44,8 @@ pub enum OpKind {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
 
     // ── Reductions ──────────────────────────────────────────────────────
     Sum {
@@ -309,6 +311,8 @@ enum OpKey {
     Mul,
     Div,
     Neg,
+    Exp,
+    Log,
     Sum {
         axis: Option<i32>,
     },
@@ -382,6 +386,8 @@ impl OpKey {
             OpKind::Mul => OpKey::Mul,
             OpKind::Div => OpKey::Div,
             OpKind::Neg => OpKey::Neg,
+            OpKind::Exp => OpKey::Exp,
+            OpKind::Log => OpKey::Log,
             OpKind::Sum { axis } => OpKey::Sum { axis: *axis },
             OpKind::Mean { axis } => OpKey::Mean { axis: *axis },
             OpKind::Max { axis } => OpKey::Max { axis: *axis },
@@ -452,7 +458,10 @@ struct CseKey {
 }
 
 fn is_cse_eligible(op: &OpKind) -> bool {
-    !matches!(op, OpKind::Parameter)
+    // Constants and Parameters must never be deduplicated: two tensors with
+    // identical data may flow through different parts of the graph and receive
+    // independent gradients during backpropagation.
+    !matches!(op, OpKind::Constant | OpKind::Parameter)
 }
 
 pub fn hash_f32_payload(data: &[f32]) -> u64 {
@@ -513,7 +522,33 @@ mod tests {
     }
 
     #[test]
-    fn test_cse_dedups_constants_and_ops() {
+    fn test_cse_does_not_dedup_constants() {
+        let mut g = Graph::new();
+        let meta = TensorMeta {
+            shape: Shape::new(vec![2]),
+            dtype: DType::F32,
+        };
+        // Constants must NOT be deduplicated — they may receive independent
+        // gradients during backpropagation.
+        let a = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
+        let b = g.intern_node(
+            OpKind::Constant,
+            SmallVec::new(),
+            meta.clone(),
+            Some(&[1.0, 2.0]),
+        );
+        // Constants must NOT be deduplicated — they may receive independent gradients
+        assert_ne!(a, b);
+        assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn test_cse_dedups_ops() {
         let mut g = Graph::new();
         let meta = TensorMeta {
             shape: Shape::new(vec![2]),
@@ -529,10 +564,8 @@ mod tests {
             OpKind::Constant,
             SmallVec::new(),
             meta.clone(),
-            Some(&[1.0, 2.0]),
+            Some(&[3.0, 4.0]),
         );
-        assert_eq!(a, b);
-        assert_eq!(g.len(), 1);
 
         let add1 = g.intern_node(
             OpKind::Add,
@@ -547,6 +580,6 @@ mod tests {
             None,
         );
         assert_eq!(add1, add2);
-        assert_eq!(g.len(), 2);
+        assert_eq!(g.len(), 3); // 2 constants + 1 deduplicated add
     }
 }

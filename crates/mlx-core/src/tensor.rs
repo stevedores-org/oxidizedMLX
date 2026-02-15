@@ -77,6 +77,53 @@ impl Tensor {
         Self::from_data(data.to_vec(), shape, DType::F32, device)
     }
 
+    /// Create a tensor from f32 data on a specific stream.
+    pub fn from_f32_on_stream(data: &[f32], shape: &Shape, stream: &Arc<Stream>) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        let meta = TensorMeta {
+            shape: shape.clone(),
+            dtype: DType::F32,
+        };
+        let node_id = stream.add_constant(data.to_vec(), meta);
+        Ok(Self {
+            node_id,
+            shape: shape.clone(),
+            dtype: DType::F32,
+            device: Device::Gpu, // Assume GPU if custom stream for now, or detect
+            stream: Arc::clone(stream),
+        })
+    }
+
+    /// Create a tensor from f32 data with a specified dtype.
+    ///
+    /// The data is stored as f32 internally; `dtype` records the logical type
+    /// (e.g. F16 weights that were converted to f32 on load).
+    pub fn from_data_with_dtype(
+        data: Vec<f32>,
+        shape: &Shape,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let expected = shape.numel() as usize;
+        if data.len() != expected {
+            return Err(MlxError::InvalidArgument(format!(
+                "data length {} does not match shape {} (expected {})",
+                data.len(),
+                shape,
+                expected,
+            )));
+        }
+        Self::from_data(data, shape, dtype, device)
+    }
+
     fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
         let stream = default_stream();
         let meta = TensorMeta {
@@ -388,12 +435,12 @@ impl Tensor {
     }
 
     /// Apply Rotary Positional Embeddings.
-    pub fn rope(&self, base: f32, offset: usize, traditional: bool) -> Tensor {
+    pub fn rope(&self, rotary_dim: usize, pos_offset: usize, theta: f32) -> Tensor {
         self.lazy_op(
-            OpKind::RoPE {
-                base,
-                offset,
-                traditional,
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
             },
             SmallVec::from_slice(&[self.node_id]),
             self.shape.clone(),

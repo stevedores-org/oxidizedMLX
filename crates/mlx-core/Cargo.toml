@@ -8,3 +8,22 @@ description = "Safe Rust API for MLX tensors, devices, and core operations"
 [dependencies]
 thiserror.workspace = true
 smallvec.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "matmul"
+harness = false
+
+[[bench]]
+name = "reductions"
+harness = false
+
+[[bench]]
+name = "norm"
+harness = false
+
+[[bench]]
+name = "rope"
+harness = false

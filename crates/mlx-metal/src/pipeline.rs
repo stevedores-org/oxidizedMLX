@@ -28,7 +28,7 @@ impl PipelineCache {
     }
 
     pub(crate) fn get_add_f32(&self, device: &Device) -> Result<ComputePipelineState> {
-        self.get_or_build(device, "add_f32", include_str!("kernels/add_f32.metal"))
+        self.get_or_build(device, "add_f32", include_str!("kernels/elementwise.metal"))
     }
 
     #[allow(dead_code)]
@@ -58,6 +58,70 @@ impl PipelineCache {
 
     pub(crate) fn get_rope_f32(&self, device: &Device) -> Result<ComputePipelineState> {
         self.get_or_build(device, "rope_f32", include_str!("kernels/rope_f32.metal"))
+    }
+
+    pub(crate) fn get_scaled_softmax_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(
+            device,
+            "scaled_softmax_f32",
+            include_str!("kernels/attention.metal"),
+        )
+    }
+
+    pub(crate) fn get_rms_norm_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "rms_norm_f32", include_str!("kernels/norm.metal"))
+    }
+
+    pub(crate) fn get_layer_norm_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "layer_norm_f32", include_str!("kernels/norm.metal"))
+    }
+
+    pub(crate) fn get_mul_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "mul_f32", include_str!("kernels/elementwise.metal"))
+    }
+
+    pub(crate) fn get_sub_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "sub_f32", include_str!("kernels/elementwise.metal"))
+    }
+
+    pub(crate) fn get_div_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "div_f32", include_str!("kernels/elementwise.metal"))
+    }
+
+    pub(crate) fn get_exp_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "exp_f32", include_str!("kernels/elementwise.metal"))
+    }
+
+    pub(crate) fn get_log_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "log_f32", include_str!("kernels/elementwise.metal"))
+    }
+
+    pub(crate) fn get_neg_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "neg_f32", include_str!("kernels/elementwise.metal"))
+    }
+
+    pub(crate) fn get_silu_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(
+            device,
+            "silu_f32",
+            include_str!("kernels/elementwise.metal"),
+        )
+    }
+
+    pub(crate) fn get_gelu_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(
+            device,
+            "gelu_f32",
+            include_str!("kernels/elementwise.metal"),
+        )
+    }
+
+    pub(crate) fn get_transpose_2d_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(
+            device,
+            "transpose_2d_f32",
+            include_str!("kernels/elementwise.metal"),
+        )
     }
 
     fn get_or_build(

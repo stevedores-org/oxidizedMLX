@@ -1,0 +1,49 @@
+name: Metal Kernel Story
+description: Add a new Metal op with parity + golden coverage
+title: "Metal: <op>"
+labels: ["metal", "kernel"]
+body:
+  - type: textarea
+    id: op
+    attributes:
+      label: Operation
+      placeholder: |
+        Op: Softmax(axis=-1)
+        Input: [rows, cols]
+        Output: same shape
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Tasks
+      placeholder: |
+        - [ ] Add kernel file in crates/mlx-metal/src/kernels/
+        - [ ] Add pipeline cache entry
+        - [ ] Add dispatch wrapper in Rust
+        - [ ] Add CPU fallback if unsupported
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Required Tests
+      placeholder: |
+        - [ ] Golden test vs Python MLX
+        - [ ] Parity test vs CPU backend
+        - [ ] Shape/property tests (proptest)
+    validations:
+      required: true
+
+  - type: textarea
+    id: perf
+    attributes:
+      label: Performance Baseline
+      placeholder: |
+        Record timing for:
+        - rows=128 cols=4096
+        - rows=512 cols=8192
+    validations:
+      required: false
