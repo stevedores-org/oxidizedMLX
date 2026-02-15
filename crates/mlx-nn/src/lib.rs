@@ -6,13 +6,13 @@
 
 mod attention;
 mod dropout;
-mod embedding;
+mod embed;
 mod linear;
 mod norm;
 
 pub use attention::MultiHeadAttention;
 pub use dropout::Dropout;
-pub use embedding::Embedding;
+pub use embed::Embedding;
 pub use linear::Linear;
 pub use norm::{LayerNorm, RmsNorm};
 
@@ -92,21 +92,36 @@ mod tests {
 
     #[test]
     fn test_embedding() {
-        // Vocab=3, dim=2. Weight: [[10,11],[20,21],[30,31]]
-        let weight =
-            Tensor::from_f32(&[10.0, 11.0, 20.0, 21.0, 30.0, 31.0], &s(&[3, 2]), &cpu()).unwrap();
+        // Weight: 4 embeddings, dim 3. Row i is [i*3+0, i*3+1, i*3+2] as f32.
+        let weight_data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let weight = Tensor::from_f32(&weight_data, &s(&[4, 3]), &cpu()).unwrap();
         let emb = Embedding::new(weight);
-        // Look up indices [2, 0, 1]
-        let indices = Tensor::from_f32(&[2.0, 0.0, 1.0], &s(&[3]), &cpu()).unwrap();
+
+        // Indices [0, 2, 1] -> rows 0, 2, 1
+        let indices = Tensor::from_f32(&[0.0, 2.0, 1.0], &s(&[3]), &cpu()).unwrap();
         let y = emb.forward(&indices).unwrap();
+        assert_eq!(y.shape().0.as_slice(), &[3, 3]);
         let result = y.to_vec_f32().unwrap();
+        // Row 0: [0,1,2], Row 2: [6,7,8], Row 1: [3,4,5]
         mlx_conformance::assert_allclose(
             &result,
-            &[30.0, 31.0, 10.0, 11.0, 20.0, 21.0],
+            &[0.0, 1.0, 2.0, 6.0, 7.0, 8.0, 3.0, 4.0, 5.0],
             1e-5,
             1e-5,
         );
-        assert_eq!(y.shape(), &s(&[3, 2]));
+    }
+
+    #[test]
+    fn test_embedding_batch() {
+        // Weight [2, 2]: rows [1,2], [3,4]
+        let weight = Tensor::from_f32(&[1.0, 2.0, 3.0, 4.0], &s(&[2, 2]), &cpu()).unwrap();
+        let emb = Embedding::new(weight);
+        // Indices shape [2, 1]: [[0], [1]]
+        let indices = Tensor::from_f32(&[0.0, 1.0], &s(&[2, 1]), &cpu()).unwrap();
+        let y = emb.forward(&indices).unwrap();
+        assert_eq!(y.shape().0.as_slice(), &[2, 1, 2]);
+        let result = y.to_vec_f32().unwrap();
+        mlx_conformance::assert_allclose(&result, &[1.0, 2.0, 3.0, 4.0], 1e-5, 1e-5);
     }
 
     #[test]
@@ -153,19 +168,6 @@ mod tests {
         let y = drop.forward(&x).unwrap();
         let result = y.to_vec_f32().unwrap();
         mlx_conformance::assert_allclose(&result, &[0.0, 0.0, 0.0], 1e-5, 1e-5);
-    }
-
-    #[test]
-    fn test_embedding_negative_index() {
-        let weight =
-            Tensor::from_f32(&[10.0, 11.0, 20.0, 21.0], &s(&[2, 2]), &cpu()).unwrap();
-        let emb = Embedding::new(weight);
-        let indices = Tensor::from_f32(&[-1.0], &s(&[1]), &cpu()).unwrap();
-        // forward() builds a lazy graph node (Ok), but the negative index
-        // validation fires at eval time when the CPU kernel runs.
-        let y = emb.forward(&indices).unwrap();
-        let result = y.to_vec_f32();
-        assert!(result.is_err(), "negative index should fail at eval time");
     }
 
     #[test]

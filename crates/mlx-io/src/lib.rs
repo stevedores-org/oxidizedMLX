@@ -46,12 +46,11 @@ pub fn save_safetensors(path: &Path, tensors: &HashMap<String, Tensor>) -> Resul
     let views: Vec<(&str, TensorView<'_>)> = data_map
         .iter()
         .map(|(name, bytes, dtype, shape)| {
-            (
-                name.as_str(),
-                TensorView::new(*dtype, shape.clone(), bytes).unwrap(),
-            )
+            TensorView::new(*dtype, shape.clone(), bytes)
+                .map_err(|e| MlxError::InvalidArgument(format!("safetensors tensor view: {e}")))
+                .map(|v| (name.as_str(), v))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     safetensors::serialize_to_file(views, &None, path)
         .map_err(|e| MlxError::InvalidArgument(format!("safetensors save error: {e}")))?;

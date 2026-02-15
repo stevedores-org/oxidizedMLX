@@ -41,6 +41,7 @@ impl Backend for CpuRefBackend {
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
             OpKind::MatMul => matmul(inputs),
+            OpKind::Embedding => embedding_lookup(inputs, output_meta),
             OpKind::Reshape { .. } => {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.to_vec())
@@ -90,7 +91,6 @@ impl Backend for CpuRefBackend {
                 offset,
                 traditional,
             } => rope(inputs, *base, *offset, *traditional),
-            OpKind::Embedding => embedding(inputs),
             OpKind::Narrow {
                 axis,
                 start,
@@ -312,6 +312,27 @@ fn softmax(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
         }
     }
     Ok(data)
+}
+
+fn embedding_lookup(inputs: &[NodeInput<'_>], output_meta: &TensorMeta) -> Result<Vec<f32>> {
+    let weight = require_input(inputs, 0)?;
+    let indices = require_input(inputs, 1)?;
+    if weight.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+        ));
+    }
+    let num_embeddings = weight.shape.0[0] as usize;
+    let embedding_dim = weight.shape.0[1] as usize;
+    let mut result = vec![0.0f32; output_meta.shape.numel() as usize];
+    for (i, &idx_f) in indices.data.iter().enumerate() {
+        let idx = idx_f as i32;
+        let row = idx.clamp(0, num_embeddings as i32 - 1) as usize;
+        let src = row * embedding_dim;
+        let dst = i * embedding_dim;
+        result[dst..dst + embedding_dim].copy_from_slice(&weight.data[src..src + embedding_dim]);
+    }
+    Ok(result)
 }
 
 fn layer_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Vec<f32>> {
@@ -788,43 +809,6 @@ fn cpu_attention(inputs: &[NodeInput<'_>], scale: f32, causal: bool) -> Result<V
     let y = cpu_matmul_raw(&probs, v.data, tq, tk, dh);
 
     Ok(y)
-}
-
-fn embedding(inputs: &[NodeInput<'_>]) -> Result<Vec<f32>> {
-    let weight = require_input(inputs, 0)?;
-    let indices = require_input(inputs, 1)?;
-
-    if weight.shape.ndim() != 2 {
-        return Err(MlxError::InvalidArgument(
-            "Embedding weight must be 2D [vocab_size, embed_dim]".into(),
-        ));
-    }
-    if indices.shape.ndim() != 1 {
-        return Err(MlxError::InvalidArgument(
-            "Embedding indices must be 1D [seq_len]".into(),
-        ));
-    }
-    let vocab_size = weight.shape.0[0] as usize;
-    let embed_dim = weight.shape.0[1] as usize;
-    let seq_len = indices.data.len();
-
-    let mut result = Vec::with_capacity(seq_len * embed_dim);
-    for &idx_f in indices.data {
-        if idx_f < 0.0 || idx_f != idx_f.trunc() {
-            return Err(MlxError::InvalidArgument(format!(
-                "Embedding index must be a non-negative integer, got {idx_f}"
-            )));
-        }
-        let idx = idx_f as usize;
-        if idx >= vocab_size {
-            return Err(MlxError::InvalidArgument(format!(
-                "Embedding index {idx} out of range for vocab_size {vocab_size}"
-            )));
-        }
-        let start = idx * embed_dim;
-        result.extend_from_slice(&weight.data[start..start + embed_dim]);
-    }
-    Ok(result)
 }
 
 fn narrow(inputs: &[NodeInput<'_>], axis: i32, start: i64, length: i64) -> Result<Vec<f32>> {

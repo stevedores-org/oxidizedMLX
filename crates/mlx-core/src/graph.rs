@@ -99,6 +99,10 @@ pub enum OpKind {
         target_shape: Shape,
     },
 
+    // ── Embedding ──────────────────────────────────────────────────
+    /// Embedding lookup: weight [num_embeddings, embedding_dim], indices [*] (f32 as int) → [*, embedding_dim].
+    Embedding,
+
     // ── Attention ──────────────────────────────────────────────────
     /// Fused scale + causal-mask + softmax along last axis.
     /// Input: scores [Tq, Tk], output: probs [Tq, Tk]
@@ -146,11 +150,6 @@ pub enum OpKind {
     },
 
     // ── Indexing / gathering ─────────────────────────────────────────────
-    /// Embedding lookup: gather rows from a weight matrix by index.
-    /// Inputs: [weight [vocab, dim], indices [seq_len]]
-    /// Output: [seq_len, dim]
-    Embedding,
-
     /// Extract a contiguous slice along an axis.
     /// Inputs: [input]
     /// Output: narrowed tensor
@@ -385,13 +384,13 @@ enum OpKey {
         offset: usize,
         traditional: bool,
     },
+    Embedding,
     SoftmaxVjp {
         axis: i32,
     },
     SiluVjp,
     GeluVjp,
     Sqrt,
-    Embedding,
     Narrow {
         axis: i32,
         start: i64,
@@ -466,11 +465,11 @@ impl OpKey {
                 offset: *offset,
                 traditional: *traditional,
             },
+            OpKind::Embedding => OpKey::Embedding,
             OpKind::SoftmaxVjp { axis } => OpKey::SoftmaxVjp { axis: *axis },
             OpKind::SiluVjp => OpKey::SiluVjp,
             OpKind::GeluVjp => OpKey::GeluVjp,
             OpKind::Sqrt => OpKey::Sqrt,
-            OpKind::Embedding => OpKey::Embedding,
             OpKind::Narrow {
                 axis,
                 start,
