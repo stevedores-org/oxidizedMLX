@@ -38,6 +38,7 @@ impl Device {
 /// In the lazy graph model a `Tensor` is a lightweight reference to a node in
 /// the computation graph. Operations build up the graph; actual computation
 /// happens when `eval()` is called (or implicitly via `to_vec_f32()`).
+#[derive(Clone)]
 pub struct Tensor {
     node_id: NodeId,
     shape: Shape,
@@ -205,7 +206,7 @@ impl Tensor {
             new_dims.push(1);
         }
         Ok(self.lazy_op(
-            OpKind::Sum { axis: Some(axis) },
+            OpKind::Sum { axis: Some(ax) },
             SmallVec::from_slice(&[self.node_id]),
             Shape::new(new_dims),
             self.dtype,
@@ -392,6 +393,65 @@ impl Tensor {
     /// Get the graph node ID.
     pub fn node_id(&self) -> NodeId {
         self.node_id
+    }
+
+    /// Get the stream this tensor belongs to.
+    pub fn stream(&self) -> Arc<Stream> {
+        Arc::clone(&self.stream)
+    }
+
+    /// Reconstruct a tensor handle from a node ID and metadata.
+    ///
+    /// Used by autograd to create handles for graph introspection.
+    pub fn from_node_id(
+        node_id: NodeId,
+        shape: Shape,
+        dtype: DType,
+        device: Device,
+        stream: Arc<Stream>,
+    ) -> Self {
+        Self {
+            node_id,
+            shape,
+            dtype,
+            device,
+            stream,
+        }
+    }
+
+    /// Broadcast this tensor to the target shape (numpy-style rules).
+    pub fn broadcast_to(&self, target: &Shape) -> Result<Tensor> {
+        if &self.shape == target {
+            return Ok(self.clone());
+        }
+        // Validate broadcast compatibility: dimensions are compared from the right.
+        let in_ndim = self.shape.ndim();
+        let out_ndim = target.ndim();
+        if in_ndim > out_ndim {
+            return Err(MlxError::InvalidArgument(format!(
+                "cannot broadcast shape {} to {}",
+                self.shape, target
+            )));
+        }
+        let pad = out_ndim - in_ndim;
+        for i in 0..in_ndim {
+            let in_dim = self.shape.0[i];
+            let out_dim = target.0[pad + i];
+            if in_dim != 1 && in_dim != out_dim {
+                return Err(MlxError::InvalidArgument(format!(
+                    "cannot broadcast shape {} to {}",
+                    self.shape, target
+                )));
+            }
+        }
+        Ok(self.lazy_op(
+            OpKind::Broadcast {
+                target_shape: target.clone(),
+            },
+            SmallVec::from_slice(&[self.node_id]),
+            target.clone(),
+            self.dtype,
+        ))
     }
 }
 

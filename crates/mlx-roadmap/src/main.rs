@@ -24,6 +24,14 @@ enum Cmd {
         /// Print what would change without making writes.
         #[arg(long)]
         dry_run: bool,
+
+        /// Max attempts for transient GitHub API connectivity failures.
+        #[arg(long, default_value_t = 30)]
+        max_attempts: usize,
+
+        /// Max sleep (ms) between retries.
+        #[arg(long, default_value_t = 30_000)]
+        max_sleep_ms: u64,
     },
 }
 
@@ -75,13 +83,21 @@ struct Issue {
 fn main() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Bootstrap { repo, dry_run } => bootstrap(repo, dry_run),
+        Cmd::Bootstrap {
+            repo,
+            dry_run,
+            max_attempts,
+            max_sleep_ms,
+        } => bootstrap(repo, dry_run, max_attempts, max_sleep_ms),
     }
 }
 
-fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
-    const MAX_ATTEMPTS: usize = 15;
-
+fn bootstrap(
+    repo: Option<String>,
+    dry_run: bool,
+    max_attempts: usize,
+    max_sleep_ms: u64,
+) -> Result<(), Error> {
     let repo = match repo {
         Some(s) => parse_repo_slug(&s)?,
         None => infer_repo_from_git_remote()?,
@@ -91,7 +107,8 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
 
     let existing_labels: Vec<Label> = gh_json_with_retries(
         &["api", &format!("repos/{}/labels?per_page=100", repo.slug())],
-        MAX_ATTEMPTS,
+        max_attempts,
+        max_sleep_ms,
     )?;
     let existing_label_names: std::collections::BTreeSet<String> =
         existing_labels.into_iter().map(|l| l.name).collect();
@@ -118,7 +135,8 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 "-f",
                 &format!("description={}", l.description),
             ],
-            MAX_ATTEMPTS,
+            max_attempts,
+            max_sleep_ms,
         )?;
         created_labels.push(l.name.to_string());
     }
@@ -128,7 +146,8 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
             "api",
             &format!("repos/{}/milestones?state=all&per_page=100", repo.slug()),
         ],
-        MAX_ATTEMPTS,
+        max_attempts,
+        max_sleep_ms,
     )?;
     let mut milestones_by_title: std::collections::BTreeMap<String, Milestone> =
         existing_milestones
@@ -156,7 +175,8 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 "-f",
                 &format!("description={}", m.description),
             ],
-            MAX_ATTEMPTS,
+            max_attempts,
+            max_sleep_ms,
         )?;
         created_milestones.push(created.title.clone());
         milestones_by_title.insert(created.title.clone(), created);
@@ -175,7 +195,8 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 "-f",
                 "per_page=5",
             ],
-            MAX_ATTEMPTS,
+            max_attempts,
+            max_sleep_ms,
         )?;
         if search.total_count > 0 {
             continue;
@@ -203,7 +224,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
             args.push(format!("milestone={}", n));
         }
 
-        let issue: Issue = gh_json_with_retries_owned(args, MAX_ATTEMPTS)?;
+        let issue: Issue = gh_json_with_retries_owned(args, max_attempts, max_sleep_ms)?;
 
         // Apply labels.
         if !epic.labels.is_empty() {
@@ -217,7 +238,7 @@ fn bootstrap(repo: Option<String>, dry_run: bool) -> Result<(), Error> {
                 lab_args.push("-f".to_string());
                 lab_args.push(format!("labels[]={}", lbl));
             }
-            gh_with_retries_owned(lab_args, MAX_ATTEMPTS)?;
+            gh_with_retries_owned(lab_args, max_attempts, max_sleep_ms)?;
         }
 
         created_issues.push(format!("{} (#{})", epic.title, issue.number));
@@ -530,11 +551,23 @@ fn is_transient_gh_error(stderr: &str) -> bool {
         || stderr.contains("githubstatus.com")
 }
 
-fn gh_with_retries(args: &[&str], max_attempts: usize) -> Result<Vec<u8>, Error> {
-    gh_with_retries_owned(args.iter().map(|s| s.to_string()).collect(), max_attempts)
+fn gh_with_retries(
+    args: &[&str],
+    max_attempts: usize,
+    max_sleep_ms: u64,
+) -> Result<Vec<u8>, Error> {
+    gh_with_retries_owned(
+        args.iter().map(|s| s.to_string()).collect(),
+        max_attempts,
+        max_sleep_ms,
+    )
 }
 
-fn gh_with_retries_owned(args: Vec<String>, max_attempts: usize) -> Result<Vec<u8>, Error> {
+fn gh_with_retries_owned(
+    args: Vec<String>,
+    max_attempts: usize,
+    max_sleep_ms: u64,
+) -> Result<Vec<u8>, Error> {
     for attempt in 1..=max_attempts {
         let mut cmd = Command::new("gh");
         cmd.args(&args);
@@ -549,9 +582,9 @@ fn gh_with_retries_owned(args: Vec<String>, max_attempts: usize) -> Result<Vec<u
         if attempt < max_attempts && is_transient_gh_error(&combined) {
             // Exponential backoff with deterministic jitter.
             // (No RNG dependency; this is just to avoid hammering.)
-            let base_ms = 200u64.saturating_mul(1u64 << attempt.min(4));
+            let base_ms = 250u64.saturating_mul(1u64 << attempt.min(6));
             let jitter_ms = (attempt as u64 * 137) % 200;
-            let sleep_ms = (base_ms + jitter_ms).min(5_000);
+            let sleep_ms = (base_ms + jitter_ms).min(max_sleep_ms);
             eprintln!(
                 "gh retry {attempt}/{max_attempts} after transient error (sleep {sleep_ms}ms): {}",
                 combined.lines().next().unwrap_or("<no output>")
@@ -572,16 +605,18 @@ fn gh_with_retries_owned(args: Vec<String>, max_attempts: usize) -> Result<Vec<u
 fn gh_json_with_retries<T: for<'de> Deserialize<'de>>(
     args: &[&str],
     max_attempts: usize,
+    max_sleep_ms: u64,
 ) -> Result<T, Error> {
-    let stdout = gh_with_retries(args, max_attempts)?;
+    let stdout = gh_with_retries(args, max_attempts, max_sleep_ms)?;
     serde_json::from_slice(&stdout).map_err(|e| Error::Json(e.to_string()))
 }
 
 fn gh_json_with_retries_owned<T: for<'de> Deserialize<'de>>(
     args: Vec<String>,
     max_attempts: usize,
+    max_sleep_ms: u64,
 ) -> Result<T, Error> {
-    let stdout = gh_with_retries_owned(args, max_attempts)?;
+    let stdout = gh_with_retries_owned(args, max_attempts, max_sleep_ms)?;
     serde_json::from_slice(&stdout).map_err(|e| Error::Json(e.to_string()))
 }
 

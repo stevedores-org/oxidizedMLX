@@ -7,4 +7,5 @@ description = "CLI tool for smoke tests, benchmarks, and conformance runs"
 
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+mlx-sys = { path = "../mlx-sys" }
 clap.workspace = true

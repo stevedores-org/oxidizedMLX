@@ -79,6 +79,12 @@ pub enum OpKind {
     RmsNorm {
         eps: f32,
     },
+
+    // ── Broadcasting ──────────────────────────────────────────────────
+    /// Broadcast a tensor to a target shape (numpy-style rules).
+    Broadcast {
+        target_shape: Shape,
+    },
 }
 
 /// The computation graph arena.
@@ -111,9 +117,9 @@ impl Graph {
         id
     }
 
-    /// Get a node by ID.
+    /// Get a node by ID (O(1) — IDs are sequential indices).
     pub fn get(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.iter().find(|n| n.id == id)
+        self.nodes.get(id.0 as usize).filter(|n| n.id == id)
     }
 
     /// Topological sort of the graph rooted at `outputs`.
