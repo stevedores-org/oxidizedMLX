@@ -7,3 +7,6 @@ description = "Optimizers (AdamW, SGD) and learning rate schedulers"
 
 [dependencies]
 mlx-core = { path = "../mlx-core" }
+
+[dev-dependencies]
+mlx-conformance = { path = "../mlx-conformance" }
