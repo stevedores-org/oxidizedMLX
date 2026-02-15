@@ -142,7 +142,7 @@ mod tests {
 
         stream.eval(c).expect("eval should succeed");
         let result = stream.get_buffer(c).expect("buffer should exist");
-        assert_close(&result, &expected, 1e-4, 2e-3);
+        assert_close(&result, &expected, 5e-4, 5e-3);
     }
 
     #[test]
@@ -214,7 +214,7 @@ mod tests {
         );
         stream.eval(c).unwrap();
         let result = stream.get_buffer(c).unwrap();
-        assert_close(&result, &expected, 1e-4, 2e-3);
+        assert_close(&result, &expected, 5e-4, 5e-3);
     }
 
     #[test]

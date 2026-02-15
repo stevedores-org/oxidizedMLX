@@ -250,7 +250,7 @@ impl MetalBackend {
             return Ok(Vec::new());
         }
 
-        let x_buf = self.data_to_buffer(inputs[0].data);
+        let x_buf = self.data_to_buffer(inputs[0].data)?;
         let out_bytes = (numel * std::mem::size_of::<f32>()) as u64;
         let out_buf = self
             .ctx
