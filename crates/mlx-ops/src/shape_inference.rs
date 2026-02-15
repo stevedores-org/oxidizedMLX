@@ -115,8 +115,9 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             // Validate broadcast compatibility.
-            let result = crate::broadcast_shapes(a, target_shape)
-                .ok_or_else(|| ShapeError::Mismatch(format!("cannot broadcast {a} to {target_shape}")))?;
+            let result = crate::broadcast_shapes(a, target_shape).ok_or_else(|| {
+                ShapeError::Mismatch(format!("cannot broadcast {a} to {target_shape}"))
+            })?;
             if &result != target_shape {
                 return Err(ShapeError::Mismatch(format!(
                     "broadcast result {result} does not match target {target_shape}"
@@ -164,7 +165,10 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             // Validate permutation indices.
             for &ax in &perm {
                 if ax >= ndim {
-                    return Err(ShapeError::InvalidAxis { axis: ax as i32, ndim });
+                    return Err(ShapeError::InvalidAxis {
+                        axis: ax as i32,
+                        ndim,
+                    });
                 }
             }
 
