@@ -536,6 +536,7 @@ mod tests {
             meta.clone(),
             Some(&[1.0, 2.0]),
         );
+        // Constants must NOT be deduplicated — they may receive independent gradients
         assert_ne!(a, b);
         assert_eq!(g.len(), 2);
     }

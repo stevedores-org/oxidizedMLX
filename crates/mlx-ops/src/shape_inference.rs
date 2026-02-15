@@ -229,7 +229,8 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 None => (0..ndim).rev().collect(),
             };
 
-            // Validate permutation indices.
+            // Validate permutation: bounds + uniqueness in a single pass.
+            let mut seen = vec![false; ndim];
             for &ax in &perm {
                 if ax >= ndim {
                     return Err(ShapeError::InvalidAxis {
@@ -237,17 +238,13 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                         ndim,
                     });
                 }
-            }
-
-            // Ensure all axes are unique.
-            let mut seen = std::collections::HashSet::new();
-            for &ax in &perm {
-                if !seen.insert(ax) {
+                if seen[ax] {
                     return Err(ShapeError::Mismatch(format!(
                         "duplicate axis {} in transpose",
                         ax
                     )));
                 }
+                seen[ax] = true;
             }
 
             let new_dims: Vec<i64> = perm.iter().map(|&ax| a.0[ax]).collect();
