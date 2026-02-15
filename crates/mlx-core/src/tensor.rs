@@ -116,64 +116,60 @@ impl Tensor {
 
     /// Element-wise addition.
     pub fn add(&self, rhs: &Tensor) -> Result<Tensor> {
-        if self.shape != rhs.shape {
-            return Err(MlxError::ShapeMismatch {
+        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
+            .ok_or_else(|| MlxError::ShapeMismatch {
                 expected: self.shape.0.clone(),
                 got: rhs.shape.0.clone(),
-            });
-        }
+            })?;
         Ok(self.lazy_op(
             OpKind::Add,
             SmallVec::from_slice(&[self.node_id, rhs.node_id]),
-            self.shape.clone(),
+            broadcast_shape,
             self.dtype,
         ))
     }
 
     /// Element-wise subtraction.
     pub fn sub(&self, rhs: &Tensor) -> Result<Tensor> {
-        if self.shape != rhs.shape {
-            return Err(MlxError::ShapeMismatch {
+        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
+            .ok_or_else(|| MlxError::ShapeMismatch {
                 expected: self.shape.0.clone(),
                 got: rhs.shape.0.clone(),
-            });
-        }
+            })?;
         Ok(self.lazy_op(
             OpKind::Sub,
             SmallVec::from_slice(&[self.node_id, rhs.node_id]),
-            self.shape.clone(),
+            broadcast_shape,
             self.dtype,
         ))
     }
 
     /// Element-wise multiplication.
     pub fn mul(&self, rhs: &Tensor) -> Result<Tensor> {
-        if self.shape != rhs.shape {
-            return Err(MlxError::ShapeMismatch {
+        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
+            .ok_or_else(|| MlxError::ShapeMismatch {
                 expected: self.shape.0.clone(),
                 got: rhs.shape.0.clone(),
-            });
-        }
+            })?;
         Ok(self.lazy_op(
             OpKind::Mul,
             SmallVec::from_slice(&[self.node_id, rhs.node_id]),
-            self.shape.clone(),
+            broadcast_shape,
             self.dtype,
         ))
     }
 
     /// Element-wise division.
     pub fn div(&self, rhs: &Tensor) -> Result<Tensor> {
-        if self.shape != rhs.shape {
-            return Err(MlxError::ShapeMismatch {
+        let broadcast_shape = Shape::broadcast_shapes(&self.shape, &rhs.shape)
+            .ok_or_else(|| MlxError::ShapeMismatch {
                 expected: self.shape.0.clone(),
                 got: rhs.shape.0.clone(),
-            });
-        }
+            })?;
         Ok(self.lazy_op(
             OpKind::Div,
             SmallVec::from_slice(&[self.node_id, rhs.node_id]),
-            self.shape.clone(),
+            broadcast_shape,
             self.dtype,
         ))
     }
@@ -201,9 +197,6 @@ impl Tensor {
         }
         let mut new_dims: Vec<i64> = self.shape.0.clone();
         new_dims.remove(ax as usize);
-        if new_dims.is_empty() {
-            new_dims.push(1);
-        }
         Ok(self.lazy_op(
             OpKind::Sum { axis: Some(axis) },
             SmallVec::from_slice(&[self.node_id]),
@@ -217,7 +210,7 @@ impl Tensor {
         Ok(self.lazy_op(
             OpKind::Sum { axis: None },
             SmallVec::from_slice(&[self.node_id]),
-            Shape::new(vec![1]),
+            Shape::scalar(),
             self.dtype,
         ))
     }
@@ -576,6 +569,16 @@ mod tests {
         assert_eq!(b.shape(), &Shape::new(vec![3, 2]));
         // [[1,2,3],[4,5,6]] transposed = [[1,4],[2,5],[3,6]]
         assert_eq!(b.to_vec_f32().unwrap(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn test_add_broadcast() {
+        let a = Tensor::from_f32(&[1.0, 2.0], &Shape::new(vec![2, 1]), &cpu()).unwrap();
+        let b = Tensor::from_f32(&[3.0, 4.0, 5.0], &Shape::new(vec![1, 3]), &cpu()).unwrap();
+        let c = a.add(&b).unwrap();
+        assert_eq!(c.shape(), &Shape::new(vec![2, 3]));
+        // [[1],[2]] + [[3,4,5]] = [[4,5,6],[5,6,7]]
+        assert_eq!(c.to_vec_f32().unwrap(), vec![4.0, 5.0, 6.0, 5.0, 6.0, 7.0]);
     }
 
     #[test]
