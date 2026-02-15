@@ -52,8 +52,7 @@ fn arb_dtype() -> impl Strategy<Value = DType> {
 
 /// Generate a 2D shape for matmul.
 fn matmul_shapes() -> impl Strategy<Value = (Shape, Shape)> {
-    (dim(), dim(), dim())
-        .prop_map(|(m, k, n)| (Shape::new(vec![m, k]), Shape::new(vec![k, n])))
+    (dim(), dim(), dim()).prop_map(|(m, k, n)| (Shape::new(vec![m, k]), Shape::new(vec![k, n])))
 }
 
 // ── Broadcasting property tests ──────────────────────────────────────────
