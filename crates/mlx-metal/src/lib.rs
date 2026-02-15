@@ -1,7 +1,20 @@
-//! Native Metal backend for Apple Silicon GPU acceleration.
-//!
-//! Replaces the MLX C++ Metal runtime with a Rust-native implementation
-//! using `metal-rs` / `objc2`. Includes command queue management, pipeline
-//! cache, and buffer allocation for unified memory.
+pub mod attention;
+pub mod buffer;
+pub mod context;
+pub mod gemm;
 
-// TODO(milestone-6): implement Metal runtime scaffolding
+pub use attention::{attention_fp16, AttnParams};
+pub use buffer::MetalBuffer;
+pub use context::MetalContext;
+
+pub type Result<T> = std::result::Result<T, MetalError>;
+
+#[derive(thiserror::Error, Debug)]
+pub enum MetalError {
+    #[error("metal error: {0}")]
+    Metal(&'static str),
+    #[error("invalid arg: {0}")]
+    Invalid(&'static str),
+    #[error("compile error: {0}")]
+    Compile(String),
+}
