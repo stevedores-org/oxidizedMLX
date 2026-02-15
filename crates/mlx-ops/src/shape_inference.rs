@@ -35,7 +35,12 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
         }
 
         // Unary ops preserve shape.
-        OpKind::Neg | OpKind::Silu | OpKind::Gelu | OpKind::Constant | OpKind::Parameter => {
+        OpKind::Neg
+        | OpKind::Silu
+        | OpKind::Gelu
+        | OpKind::Constant
+        | OpKind::Parameter
+        | OpKind::RoPE { .. } => {
             let a = inputs
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;

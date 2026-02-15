@@ -95,6 +95,14 @@ pub enum OpKind {
     RmsNormVjp {
         eps: f32,
     },
+
+    // ── Rotary Positional Embeddings ───────────────────────────────────
+    #[cfg_attr(target_os = "macos", doc = "Apply rotary positional embeddings.")]
+    RoPE {
+        base: f32,
+        offset: usize,
+        traditional: bool,
+    },
 }
 
 /// The computation graph arena.
