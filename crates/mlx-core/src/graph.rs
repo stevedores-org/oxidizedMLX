@@ -80,6 +80,15 @@ pub enum OpKind {
         eps: f32,
     },
 
+    // ── Positional encoding ────────────────────────────────────────────
+    /// Rotary positional embeddings (RoPE).
+    /// Applied in-place to interleaved pairs of the last dimension.
+    Rope {
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta: f32,
+    },
+
     // ── Broadcasting ──────────────────────────────────────────────────
     /// Broadcast a tensor to a target shape (numpy-style rules).
     Broadcast {

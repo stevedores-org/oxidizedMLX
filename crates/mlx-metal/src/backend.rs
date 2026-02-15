@@ -5,6 +5,7 @@ use mlx_core::{MlxError, Result};
 use std::sync::Arc;
 
 use crate::context::MetalContext;
+use crate::rope::RopeParams;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -207,6 +208,99 @@ impl MetalBackend {
 
         Ok(result)
     }
+
+    fn eval_rope(
+        &self,
+        inputs: &[NodeInput<'_>],
+        meta: &TensorMeta,
+        rotary_dim: usize,
+        pos_offset: usize,
+        theta: f32,
+    ) -> Result<Vec<f32>> {
+        if inputs.len() != 1 {
+            return Err(MlxError::InvalidArgument(
+                "Rope requires exactly 1 input".into(),
+            ));
+        }
+        if meta.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "Rope input must be 2-D [tokens, head_dim]".into(),
+            ));
+        }
+
+        let tokens = meta.shape.0[0] as usize;
+        let head_dim = meta.shape.0[1] as usize;
+        let numel = tokens * head_dim;
+
+        if rotary_dim > head_dim {
+            return Err(MlxError::InvalidArgument(
+                "rotary_dim must be <= head_dim".into(),
+            ));
+        }
+        if !rotary_dim.is_multiple_of(2) {
+            return Err(MlxError::InvalidArgument("rotary_dim must be even".into()));
+        }
+        if inputs[0].data.len() != numel {
+            return Err(MlxError::InvalidArgument(format!(
+                "Rope input length mismatch: expected {numel}, got {}",
+                inputs[0].data.len()
+            )));
+        }
+        if numel == 0 {
+            return Ok(Vec::new());
+        }
+
+        let x_buf = self.data_to_buffer(inputs[0].data);
+        let out_bytes = (numel * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self
+            .ctx
+            .device()
+            .new_buffer(out_bytes, MTLResourceOptions::StorageModeShared);
+
+        let params = RopeParams {
+            tokens: tokens as u32,
+            head_dim: head_dim as u32,
+            rotary_dim: rotary_dim as u32,
+            pos_offset: pos_offset as u32,
+            theta,
+        };
+        let params_buf = self.ctx.device().new_buffer_with_data(
+            &params as *const _ as *const _,
+            std::mem::size_of::<RopeParams>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        let pipeline = self
+            .ctx
+            .pipelines()
+            .get_rope_f32(self.ctx.device())
+            .map_err(|e| MlxError::InvalidArgument(e.to_string()))?;
+
+        let queue = self.ctx.queue();
+        let cmd_buf = queue.new_command_buffer();
+        let encoder = cmd_buf.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&pipeline);
+        encoder.set_buffer(0, Some(&x_buf), 0);
+        encoder.set_buffer(1, Some(&out_buf), 0);
+        encoder.set_buffer(2, Some(&params_buf), 0);
+
+        let numel_u64 = numel as u64;
+        let thread_group_size =
+            MTLSize::new(pipeline.thread_execution_width().min(numel_u64), 1, 1);
+        let grid_size = MTLSize::new(numel_u64, 1, 1);
+        encoder.dispatch_threads(grid_size, thread_group_size);
+        encoder.end_encoding();
+
+        cmd_buf.commit();
+        cmd_buf.wait_until_completed();
+
+        let result = unsafe {
+            let ptr = out_buf.contents() as *const f32;
+            std::slice::from_raw_parts(ptr, numel).to_vec()
+        };
+
+        Ok(result)
+    }
 }
 
 impl Backend for MetalBackend {
@@ -222,6 +316,11 @@ impl Backend for MetalBackend {
             )),
             OpKind::Add => self.eval_add(inputs, meta),
             OpKind::MatMul => self.eval_matmul(inputs, meta),
+            OpKind::Rope {
+                rotary_dim,
+                pos_offset,
+                theta,
+            } => self.eval_rope(inputs, meta, *rotary_dim, *pos_offset, *theta),
             _ => Err(MlxError::InvalidArgument(format!(
                 "Metal: unsupported op {:?}",
                 op
