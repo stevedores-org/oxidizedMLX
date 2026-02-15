@@ -363,6 +363,16 @@ impl Tensor {
                 got: self.shape.0.clone(),
             });
         }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "layer_norm_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "layer_norm_vjp requires matching devices".into(),
+            ));
+        }
         Ok(self.lazy_op(
             OpKind::LayerNormVjp { eps },
             SmallVec::from_slice(&[self.node_id, input.node_id]),
@@ -378,6 +388,16 @@ impl Tensor {
                 expected: input.shape.0.clone(),
                 got: self.shape.0.clone(),
             });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "rms_norm_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "rms_norm_vjp requires matching devices".into(),
+            ));
         }
         Ok(self.lazy_op(
             OpKind::RmsNormVjp { eps },

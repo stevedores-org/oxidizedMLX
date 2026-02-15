@@ -346,7 +346,7 @@ fn broadcast(inputs: &[NodeInput<'_>], target_shape: &crate::Shape) -> Result<Ve
 fn layer_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
     let dy = require_input(inputs, 0)?;
     let x = require_input(inputs, 1)?;
-    if dy.shape != x.shape {
+    if dy.shape != x.shape || dy.data.len() != x.data.len() {
         return Err(MlxError::ShapeMismatch {
             expected: x.shape.0.clone(),
             got: dy.shape.0.clone(),
@@ -405,7 +405,7 @@ fn layer_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
 fn rms_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
     let dy = require_input(inputs, 0)?;
     let x = require_input(inputs, 1)?;
-    if dy.shape != x.shape {
+    if dy.shape != x.shape || dy.data.len() != x.data.len() {
         return Err(MlxError::ShapeMismatch {
             expected: x.shape.0.clone(),
             got: dy.shape.0.clone(),
@@ -417,7 +417,7 @@ fn rms_norm_vjp(inputs: &[NodeInput<'_>], eps: f32) -> Result<Vec<f32>> {
     }
     let d = x.shape.0[ndim - 1] as usize;
     if d == 0 || x.data.is_empty() {
-        return Ok(Vec::new());
+        return Ok(vec![0.0f32; x.data.len()]);
     }
     let d_f = d as f32;
     let outer = x.data.len() / d;
