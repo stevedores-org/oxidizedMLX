@@ -17,6 +17,9 @@ mod metal_impl {
     use mlx_core::{MlxError, Result};
     use std::sync::Arc;
 
+    #[allow(dead_code)]
+    mod gemm;
+
     /// Metal Shading Language source for element-wise add.
     const ADD_F32_SOURCE: &str = r#"
 #include <metal_stdlib>
@@ -31,10 +34,13 @@ kernel void add_f32(device const float* a [[buffer(0)]],
 "#;
 
     /// Owns the Metal device and command queue. Created once per backend.
+    #[allow(dead_code)]
     pub struct MetalContext {
         device: Device,
         queue: CommandQueue,
         add_pipeline: ComputePipelineState,
+        naive_gemm_pipeline: ComputePipelineState,
+        tiled_gemm_pipeline: ComputePipelineState,
     }
 
     impl MetalContext {
@@ -57,10 +63,31 @@ kernel void add_f32(device const float* a [[buffer(0)]],
                 .new_compute_pipeline_state_with_function(&add_fn)
                 .map_err(|e| MlxError::InvalidArgument(format!("Metal pipeline error: {e}")))?;
 
+            // Compile GEMM kernels.
+            let gemm_library = device
+                .new_library_with_source(gemm::GEMM_F32_SOURCE, &opts)
+                .map_err(|e| MlxError::InvalidArgument(format!("Metal GEMM compile error: {e}")))?;
+
+            let naive_gemm_fn = gemm_library
+                .get_function("naive_gemm_f32", None)
+                .map_err(|e| MlxError::InvalidArgument(format!("Metal function error: {e}")))?;
+            let naive_gemm_pipeline = device
+                .new_compute_pipeline_state_with_function(&naive_gemm_fn)
+                .map_err(|e| MlxError::InvalidArgument(format!("Metal pipeline error: {e}")))?;
+
+            let tiled_gemm_fn = gemm_library
+                .get_function("tiled_gemm_f32", None)
+                .map_err(|e| MlxError::InvalidArgument(format!("Metal function error: {e}")))?;
+            let tiled_gemm_pipeline = device
+                .new_compute_pipeline_state_with_function(&tiled_gemm_fn)
+                .map_err(|e| MlxError::InvalidArgument(format!("Metal pipeline error: {e}")))?;
+
             Ok(Self {
                 device,
                 queue,
                 add_pipeline,
+                naive_gemm_pipeline,
+                tiled_gemm_pipeline,
             })
         }
 
@@ -163,6 +190,84 @@ kernel void add_f32(device const float* a [[buffer(0)]],
 
             Ok(result)
         }
+
+        /// Matrix multiplication on the GPU (tiled kernel).
+        fn eval_matmul(&self, inputs: &[NodeInput<'_>], _meta: &TensorMeta) -> Result<Vec<f32>> {
+            if inputs.len() != 2 {
+                return Err(MlxError::InvalidArgument(
+                    "MatMul requires exactly 2 inputs".into(),
+                ));
+            }
+
+            // Both inputs must be 2-D.
+            if inputs[0].shape.ndim() != 2 || inputs[1].shape.ndim() != 2 {
+                return Err(MlxError::InvalidArgument(
+                    "MatMul inputs must be 2-D".into(),
+                ));
+            }
+
+            let m = inputs[0].shape.0[0] as u32;
+            let k = inputs[0].shape.0[1] as u32;
+            let k2 = inputs[1].shape.0[0] as u32;
+            let n = inputs[1].shape.0[1] as u32;
+
+            if k != k2 {
+                return Err(MlxError::ShapeMismatch {
+                    expected: vec![m as i64, k as i64],
+                    got: vec![k2 as i64, n as i64],
+                });
+            }
+
+            let numel = (m as usize) * (n as usize);
+
+            // Fast-path: empty tensor.
+            if numel == 0 {
+                return Ok(Vec::new());
+            }
+
+            let a_buf = self.ctx.data_to_buffer(inputs[0].data);
+            let b_buf = self.ctx.data_to_buffer(inputs[1].data);
+
+            let out_bytes = (numel * std::mem::size_of::<f32>()) as u64;
+            let out_buf = self
+                .ctx
+                .device()
+                .new_buffer(out_bytes, MTLResourceOptions::StorageModeShared);
+
+            let params = gemm::GemmParams { m, n, k };
+            let params_bytes = std::mem::size_of::<gemm::GemmParams>() as u64;
+            let params_buf = self
+                .ctx
+                .device()
+                .new_buffer(params_bytes, MTLResourceOptions::StorageModeShared);
+            unsafe {
+                let dst = params_buf.contents() as *mut gemm::GemmParams;
+                *dst = params;
+            }
+
+            let cmd_buf = self.ctx.queue.new_command_buffer();
+            let encoder = cmd_buf.new_compute_command_encoder();
+            encoder.set_compute_pipeline_state(&self.ctx.tiled_gemm_pipeline);
+            encoder.set_buffer(0, Some(&a_buf), 0);
+            encoder.set_buffer(1, Some(&b_buf), 0);
+            encoder.set_buffer(2, Some(&out_buf), 0);
+            encoder.set_buffer(3, Some(&params_buf), 0);
+
+            let thread_groups = MTLSize::new(n.div_ceil(16) as u64, m.div_ceil(16) as u64, 1);
+            let threads_per_group = MTLSize::new(16, 16, 1);
+            encoder.dispatch_thread_groups(thread_groups, threads_per_group);
+            encoder.end_encoding();
+
+            cmd_buf.commit();
+            cmd_buf.wait_until_completed();
+
+            let result = unsafe {
+                let ptr = out_buf.contents() as *const f32;
+                std::slice::from_raw_parts(ptr, numel).to_vec()
+            };
+
+            Ok(result)
+        }
     }
 
     impl Backend for MetalBackend {
@@ -177,6 +282,7 @@ kernel void add_f32(device const float* a [[buffer(0)]],
                     "Constant/Parameter nodes should be pre-materialized".into(),
                 )),
                 OpKind::Add => self.eval_add(inputs, meta),
+                OpKind::MatMul => self.eval_matmul(inputs, meta),
                 _ => Err(MlxError::InvalidArgument(format!(
                     "Metal: unsupported op {:?}",
                     op
@@ -256,5 +362,104 @@ mod tests {
         stream.eval(c).expect("eval should succeed");
         let result = stream.get_buffer(c).expect("buffer should exist");
         assert_eq!(result, vec![6.0, 8.0, 10.0, 12.0]);
+    }
+
+    // ── MatMul correctness tests ────────────────────────────────────────────
+
+    /// CPU triple-loop reference for MatMul.
+    fn cpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; m * n];
+        for row in 0..m {
+            for col in 0..n {
+                let mut acc = 0.0f32;
+                for i in 0..k {
+                    acc += a[row * k + i] * b[i * n + col];
+                }
+                out[row * n + col] = acc;
+            }
+        }
+        out
+    }
+
+    /// Assert element-wise closeness: |a - b| <= atol + rtol * |b|.
+    fn assert_close(actual: &[f32], expected: &[f32]) {
+        assert_eq!(actual.len(), expected.len(), "length mismatch");
+        let atol = 1e-4_f32;
+        let rtol = 1e-4_f32;
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            let diff = (a - e).abs();
+            let tol = atol + rtol * e.abs();
+            assert!(
+                diff <= tol,
+                "element {i}: actual={a}, expected={e}, diff={diff}, tol={tol}"
+            );
+        }
+    }
+
+    fn run_matmul_test(m: usize, k: usize, n: usize) {
+        let stream = metal_stream().expect("Metal should be available on macOS");
+
+        // Deterministic data: simple ascending pattern.
+        let a_data: Vec<f32> = (0..m * k).map(|i| (i as f32) * 0.01).collect();
+        let b_data: Vec<f32> = (0..k * n).map(|i| (i as f32) * 0.01).collect();
+
+        let expected = cpu_matmul(&a_data, &b_data, m, k, n);
+
+        let a = stream.add_constant(
+            a_data,
+            TensorMeta {
+                shape: Shape::new(vec![m as i64, k as i64]),
+                dtype: DType::F32,
+            },
+        );
+        let b = stream.add_constant(
+            b_data,
+            TensorMeta {
+                shape: Shape::new(vec![k as i64, n as i64]),
+                dtype: DType::F32,
+            },
+        );
+        let c = stream.add_op(
+            OpKind::MatMul,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            TensorMeta {
+                shape: Shape::new(vec![m as i64, n as i64]),
+                dtype: DType::F32,
+            },
+        );
+
+        stream.eval(c).expect("eval should succeed");
+        let result = stream.get_buffer(c).expect("buffer should exist");
+        assert_close(&result, &expected);
+    }
+
+    #[test]
+    fn test_matmul_2x2x2() {
+        run_matmul_test(2, 2, 2);
+    }
+
+    #[test]
+    fn test_matmul_4x4x4() {
+        run_matmul_test(4, 4, 4);
+    }
+
+    #[test]
+    fn test_matmul_64x64x64() {
+        run_matmul_test(64, 64, 64);
+    }
+
+    #[test]
+    fn test_matmul_1x4096x4096() {
+        run_matmul_test(1, 4096, 4096);
+    }
+
+    #[test]
+    fn test_matmul_128x4096x4096() {
+        run_matmul_test(128, 4096, 4096);
+    }
+
+    #[test]
+    fn test_matmul_non_power_of_2() {
+        run_matmul_test(17, 31, 23);
     }
 }
