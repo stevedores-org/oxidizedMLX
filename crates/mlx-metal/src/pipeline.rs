@@ -27,6 +27,19 @@ impl PipelineCache {
         self.get_or_build(device, ADD_U32_NAME, add_u32_source())
     }
 
+    pub(crate) fn get_add_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "add_f32", include_str!("kernels/add_f32.metal"))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_naive_gemm_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "naive_gemm_f32", include_str!("kernels/gemm.metal"))
+    }
+
+    pub(crate) fn get_tiled_gemm_f32(&self, device: &Device) -> Result<ComputePipelineState> {
+        self.get_or_build(device, "tiled_gemm_f32", include_str!("kernels/gemm.metal"))
+    }
+
     fn get_or_build(
         &self,
         device: &Device,

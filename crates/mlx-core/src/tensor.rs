@@ -202,9 +202,6 @@ impl Tensor {
         }
         let mut new_dims: Vec<i64> = self.shape.0.clone();
         new_dims.remove(ax as usize);
-        if new_dims.is_empty() {
-            new_dims.push(1);
-        }
         Ok(self.lazy_op(
             OpKind::Sum { axis: Some(ax) },
             SmallVec::from_slice(&[self.node_id]),
@@ -218,7 +215,7 @@ impl Tensor {
         Ok(self.lazy_op(
             OpKind::Sum { axis: None },
             SmallVec::from_slice(&[self.node_id]),
-            Shape::new(vec![1]),
+            Shape::scalar(),
             self.dtype,
         ))
     }
@@ -272,16 +269,31 @@ impl Tensor {
 
     /// Transpose (reverses axes by default, or use specified permutation).
     pub fn transpose(&self, axes: Option<&[usize]>) -> Result<Tensor> {
+        let ndim = self.shape.ndim();
         let perm: Vec<usize> = match axes {
             Some(ax) => {
-                if ax.len() != self.shape.ndim() {
+                if ax.len() != ndim {
                     return Err(MlxError::InvalidArgument(
                         "transpose axes length must match ndim".into(),
                     ));
                 }
+                let mut seen = vec![false; ndim];
+                for &axis in ax {
+                    if axis >= ndim {
+                        return Err(MlxError::InvalidArgument(format!(
+                            "transpose axis {axis} out of range for ndim {ndim}"
+                        )));
+                    }
+                    if seen[axis] {
+                        return Err(MlxError::InvalidArgument(format!(
+                            "duplicate transpose axis {axis} in axes; expected a permutation of 0..{ndim}"
+                        )));
+                    }
+                    seen[axis] = true;
+                }
                 ax.to_vec()
             }
-            None => (0..self.shape.ndim()).rev().collect(),
+            None => (0..ndim).rev().collect(),
         };
         let new_dims: Vec<i64> = perm.iter().map(|&ax| self.shape.0[ax]).collect();
         Ok(self.lazy_op(
@@ -351,6 +363,60 @@ impl Tensor {
             self.shape.clone(),
             self.dtype,
         )
+    }
+
+    // ── Backward (VJP) helpers ─────────────────────────────────────────
+
+    /// LayerNorm VJP: compute grad_input given grad_output and original input.
+    pub fn layer_norm_vjp(&self, input: &Tensor, eps: f32) -> Result<Tensor> {
+        if self.shape != input.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: input.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "layer_norm_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "layer_norm_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::LayerNormVjp { eps },
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        ))
+    }
+
+    /// RmsNorm VJP: compute grad_input given grad_output and original input.
+    pub fn rms_norm_vjp(&self, input: &Tensor, eps: f32) -> Result<Tensor> {
+        if self.shape != input.shape {
+            return Err(MlxError::ShapeMismatch {
+                expected: input.shape.0.clone(),
+                got: self.shape.0.clone(),
+            });
+        }
+        if self.dtype != input.dtype {
+            return Err(MlxError::InvalidArgument(
+                "rms_norm_vjp requires matching dtypes".into(),
+            ));
+        }
+        if self.device != input.device {
+            return Err(MlxError::InvalidArgument(
+                "rms_norm_vjp requires matching devices".into(),
+            ));
+        }
+        Ok(self.lazy_op(
+            OpKind::RmsNormVjp { eps },
+            SmallVec::from_slice(&[self.node_id, input.node_id]),
+            input.shape.clone(),
+            input.dtype,
+        ))
     }
 
     // ── Materialization ─────────────────────────────────────────────────
@@ -664,5 +730,23 @@ mod tests {
         let vals = b.to_vec_f32().unwrap();
         let mean: f32 = vals.iter().sum::<f32>() / 3.0;
         assert!(mean.abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_reduce_zero_dim_bug() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 3, 0]), &cpu()).unwrap();
+        let s = x.sum_axis(1).unwrap(); // Should return shape [2, 0]
+        assert_eq!(s.shape(), &Shape::new(vec![2, 0]));
+        let vals = s.to_vec_f32().unwrap();
+        assert_eq!(vals.len(), 0);
+    }
+
+    #[test]
+    fn test_softmax_zero_trailing_dim() {
+        let x = Tensor::from_f32(&[], &Shape::new(vec![2, 3, 0]), &cpu()).unwrap();
+        let s = x.softmax(1).unwrap();
+        assert_eq!(s.shape(), &Shape::new(vec![2, 3, 0]));
+        let vals = s.to_vec_f32().unwrap();
+        assert_eq!(vals.len(), 0);
     }
 }

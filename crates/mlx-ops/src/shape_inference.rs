@@ -65,14 +65,11 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
                 .first()
                 .ok_or(ShapeError::Mismatch("missing input".into()))?;
             match axis {
-                None => Ok(Shape::new(vec![1])),
+                None => Ok(Shape::scalar()),
                 Some(ax) => {
                     let resolved = resolve_axis(*ax, a.ndim())?;
                     let mut dims = a.0.clone();
                     dims.remove(resolved);
-                    if dims.is_empty() {
-                        dims.push(1);
-                    }
                     Ok(Shape::new(dims))
                 }
             }
@@ -102,6 +99,22 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
 
         // Broadcast: output shape is the target shape.
         OpKind::Broadcast { target_shape } => Ok(target_shape.clone()),
+
+        // Backward ops: output shape = input shape (must match grad_output shape).
+        OpKind::LayerNormVjp { .. } | OpKind::RmsNormVjp { .. } => {
+            let grad_output = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing grad_output (input 0)".into()))?;
+            let original_input = inputs.get(1).ok_or(ShapeError::Mismatch(
+                "missing original input (input 1)".into(),
+            ))?;
+            if grad_output.0 != original_input.0 {
+                return Err(ShapeError::Mismatch(
+                    "VJP grad_output and input shapes must match".into(),
+                ));
+            }
+            Ok((*original_input).clone())
+        }
 
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
@@ -179,7 +192,7 @@ mod tests {
     fn test_sum_all() {
         let a = s(&[2, 3]);
         let result = infer_shape(&OpKind::Sum { axis: None }, &[&a]).unwrap();
-        assert_eq!(result, s(&[1]));
+        assert_eq!(result, Shape::scalar());
     }
 
     #[test]

@@ -85,6 +85,16 @@ pub enum OpKind {
     Broadcast {
         target_shape: Shape,
     },
+
+    // ── Backward (VJP) ops ──────────────────────────────────────────
+    /// LayerNorm backward: inputs = [grad_output, input], produces grad_input.
+    LayerNormVjp {
+        eps: f32,
+    },
+    /// RmsNorm backward: inputs = [grad_output, input], produces grad_input.
+    RmsNormVjp {
+        eps: f32,
+    },
 }
 
 /// The computation graph arena.
