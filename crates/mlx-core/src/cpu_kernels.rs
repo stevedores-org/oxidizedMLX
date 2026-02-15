@@ -29,6 +29,14 @@ impl Backend for CpuRefBackend {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.iter().map(|x| -x).collect())
             }
+            OpKind::Exp => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.exp()).collect())
+            }
+            OpKind::Log => {
+                let a = require_input(inputs, 0)?;
+                Ok(a.data.iter().map(|x| x.ln()).collect())
+            }
             OpKind::Sum { axis } => reduce_sum(inputs, *axis),
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
