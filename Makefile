@@ -32,8 +32,7 @@ test:
 	cargo test --workspace --exclude mlx-sys --exclude mlx-conformance
 
 test-ffi:
-	cargo test --workspace
+	cargo test -p mlx-sys --features ffi
 
 clippy-ffi:
-	cargo clippy --workspace --all-targets -- -D warnings
-
+	cargo clippy -p mlx-sys --features ffi --all-targets -- -D warnings
