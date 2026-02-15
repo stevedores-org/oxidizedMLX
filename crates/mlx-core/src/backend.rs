@@ -5,6 +5,7 @@
 //! materialized buffers and evaluation scheduling.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::Result;
@@ -41,6 +42,7 @@ pub struct Stream {
     graph: Mutex<Graph>,
     backend: Box<dyn Backend>,
     buffers: Mutex<HashMap<NodeId, Vec<f32>>>,
+    eval_calls: AtomicU64,
 }
 
 impl Stream {
@@ -50,6 +52,7 @@ impl Stream {
             graph: Mutex::new(Graph::new()),
             backend,
             buffers: Mutex::new(HashMap::new()),
+            eval_calls: AtomicU64::new(0),
         }
     }
 
@@ -140,6 +143,7 @@ impl Stream {
                 })
                 .collect();
 
+            self.eval_calls.fetch_add(1, Ordering::Relaxed);
             let result = self.backend.eval_node(&node.op, &inputs, &node.meta)?;
 
             // Step 4: store result (buffers lock only for write).
@@ -163,6 +167,16 @@ impl Stream {
     pub fn topo_sort(&self, outputs: &[NodeId]) -> Vec<NodeId> {
         self.graph.lock().unwrap().topo_sort(outputs)
     }
+
+    /// Number of times the backend's `eval_node` has been called.
+    pub fn eval_count(&self) -> u64 {
+        self.eval_calls.load(Ordering::Relaxed)
+    }
+
+    /// Number of materialized buffers currently cached.
+    pub fn cache_len(&self) -> usize {
+        self.buffers.lock().unwrap().len()
+    }
 }
 
 impl std::fmt::Debug for Stream {
@@ -184,6 +198,7 @@ pub fn default_stream() -> Arc<Stream> {
 mod tests {
     use super::*;
     use crate::graph::TensorMeta;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn test_stream_constant() {
@@ -226,5 +241,204 @@ mod tests {
         );
         stream.eval(c).unwrap();
         assert_eq!(stream.get_buffer(c).unwrap(), vec![4.0, 6.0]);
+    }
+
+    fn fresh_stream() -> Stream {
+        Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))
+    }
+
+    fn meta2() -> TensorMeta {
+        TensorMeta {
+            shape: Shape::new(vec![2]),
+            dtype: DType::F32,
+        }
+    }
+
+    #[test]
+    fn test_memoization_repeated_eval() {
+        let s = fresh_stream();
+        let a = s.add_constant(vec![1.0, 2.0], meta2());
+        let b = s.add_constant(vec![3.0, 4.0], meta2());
+        let c = s.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            meta2(),
+        );
+
+        s.eval(c).unwrap();
+        let count_after_first = s.eval_count();
+        assert!(count_after_first > 0);
+
+        s.eval(c).unwrap();
+        assert_eq!(
+            s.eval_count(),
+            count_after_first,
+            "repeated eval should not recompute"
+        );
+    }
+
+    #[test]
+    fn test_memoization_shared_subgraph() {
+        let s = fresh_stream();
+        let a = s.add_constant(vec![1.0, 2.0], meta2());
+        let b = s.add_constant(vec![3.0, 4.0], meta2());
+        let c = s.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            meta2(),
+        );
+        let d = s.add_op(
+            OpKind::Mul,
+            smallvec::SmallVec::from_slice(&[c, c]),
+            meta2(),
+        );
+
+        s.eval(d).unwrap();
+        let count_after_d = s.eval_count();
+
+        // Re-eval d — fully cached.
+        s.eval(d).unwrap();
+        assert_eq!(
+            s.eval_count(),
+            count_after_d,
+            "repeated eval of d should not recompute"
+        );
+
+        // Eval c separately — already cached from d's eval.
+        s.eval(c).unwrap();
+        assert_eq!(
+            s.eval_count(),
+            count_after_d,
+            "c should already be cached from d's eval"
+        );
+    }
+
+    #[test]
+    fn test_memoization_diamond() {
+        let s = fresh_stream();
+        let a = s.add_constant(vec![1.0, 2.0], meta2());
+        // diamond: b = a+a, c = a*a, d = b+c
+        let b = s.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, a]),
+            meta2(),
+        );
+        let c = s.add_op(
+            OpKind::Mul,
+            smallvec::SmallVec::from_slice(&[a, a]),
+            meta2(),
+        );
+        let d = s.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[b, c]),
+            meta2(),
+        );
+
+        s.eval(d).unwrap();
+        // a is a constant (pre-cached), so only b, c, d need backend calls = 3
+        assert_eq!(
+            s.eval_count(),
+            3,
+            "diamond should require exactly 3 backend calls"
+        );
+
+        s.eval(d).unwrap();
+        assert_eq!(
+            s.eval_count(),
+            3,
+            "repeated eval should not increase call count"
+        );
+    }
+
+    #[test]
+    fn test_cache_len_updates() {
+        let s = fresh_stream();
+        assert_eq!(s.cache_len(), 0);
+
+        let a = s.add_constant(vec![1.0, 2.0], meta2());
+        let b = s.add_constant(vec![3.0, 4.0], meta2());
+        assert_eq!(s.cache_len(), 2);
+
+        let c = s.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            meta2(),
+        );
+        s.eval(c).unwrap();
+        assert_eq!(s.cache_len(), 3);
+    }
+
+    #[test]
+    fn test_eval_is_memoized_no_recompute() {
+        struct CountingBackend {
+            inner: crate::cpu_kernels::CpuRefBackend,
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Backend for CountingBackend {
+            fn eval_node(
+                &self,
+                op: &OpKind,
+                inputs: &[NodeInput<'_>],
+                output_meta: &TensorMeta,
+            ) -> Result<Vec<f32>> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.inner.eval_node(op, inputs, output_meta)
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let stream = Stream::new(Box::new(CountingBackend {
+            inner: crate::cpu_kernels::CpuRefBackend,
+            calls: Arc::clone(&calls),
+        }));
+
+        let a = stream.add_constant(
+            vec![1.0, 2.0],
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+        let b = stream.add_constant(
+            vec![3.0, 4.0],
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+
+        // Two op nodes: add then neg
+        let add = stream.add_op(
+            OpKind::Add,
+            smallvec::SmallVec::from_slice(&[a, b]),
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+        let out = stream.add_op(
+            OpKind::Neg,
+            smallvec::SmallVec::from_slice(&[add]),
+            TensorMeta {
+                shape: Shape::new(vec![2]),
+                dtype: DType::F32,
+            },
+        );
+
+        stream.eval(out).unwrap();
+        let after_first = calls.load(Ordering::Relaxed);
+        assert_eq!(after_first, 2);
+        assert_eq!(stream.get_buffer(out).unwrap(), vec![-4.0, -6.0]);
+
+        // Repeated eval should not call into the backend again.
+        stream.eval(out).unwrap();
+        let after_second = calls.load(Ordering::Relaxed);
+        assert_eq!(after_first, after_second);
+
+        // Evaluating already-materialized intermediates should also be a no-op.
+        stream.eval(add).unwrap();
+        let after_third = calls.load(Ordering::Relaxed);
+        assert_eq!(after_second, after_third);
     }
 }
