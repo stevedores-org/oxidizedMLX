@@ -228,6 +228,55 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             Ok(Shape::new(out_shape))
         }
 
+        // Narrow: slice along axis
+        OpKind::Narrow {
+            axis,
+            start,
+            length,
+        } => {
+            let a = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let resolved = resolve_axis(*axis, a.ndim())?;
+            let dim_size = a.0[resolved];
+            if *start < 0 || start + length > dim_size {
+                return Err(ShapeError::Mismatch(format!(
+                    "Narrow: start {} + length {} exceeds dim size {}",
+                    start, length, dim_size
+                )));
+            }
+            let mut dims = a.0.clone();
+            dims[resolved] = *length;
+            Ok(Shape::new(dims))
+        }
+
+        // Concatenate: join along axis
+        OpKind::Concatenate { axis } => {
+            let first = inputs
+                .first()
+                .ok_or(ShapeError::Mismatch("missing input".into()))?;
+            let resolved = resolve_axis(*axis, first.ndim())?;
+            let mut total_dim: i64 = 0;
+            for inp in inputs {
+                if inp.ndim() != first.ndim() {
+                    return Err(ShapeError::Mismatch(
+                        "Concatenate: all inputs must have same ndim".into(),
+                    ));
+                }
+                for (d, (&a, &b)) in first.0.iter().zip(inp.0.iter()).enumerate() {
+                    if d != resolved && a != b {
+                        return Err(ShapeError::Mismatch(format!(
+                            "Concatenate: mismatch at dim {d}: {a} vs {b}"
+                        )));
+                    }
+                }
+                total_dim += inp.0[resolved];
+            }
+            let mut dims = first.0.clone();
+            dims[resolved] = total_dim;
+            Ok(Shape::new(dims))
+        }
+
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
             let a = inputs
