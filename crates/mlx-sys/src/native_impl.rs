@@ -36,6 +36,15 @@ unsafe fn ref_device<'a>(p: *mut mlx_device_t) -> &'a Device {
     unsafe { &*(p as *const Device) }
 }
 
+/// Build a slice from a C pointer+length, returning `&[]` when `len == 0`.
+unsafe fn safe_slice<'a, T>(ptr: *const T, len: size_t) -> &'a [T] {
+    if len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(ptr, len) }
+    }
+}
+
 fn convert_dtype(dt: mlx_dtype_t) -> DType {
     match dt {
         mlx_dtype_t::F32 => DType::F32,
@@ -50,7 +59,7 @@ fn convert_dtype(dt: mlx_dtype_t) -> DType {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mlxrs_default_device() -> *mut mlx_device_t {
-    box_device(Device::Cpu)
+    box_device(Device::default_device())
 }
 
 // ── Tensor creation ─────────────────────────────────────────────────────
@@ -63,7 +72,7 @@ pub unsafe extern "C" fn mlxrs_zeros(
     shape_len: size_t,
 ) -> *mut mlx_tensor_t {
     let dev = unsafe { ref_device(device) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
+    let dims = unsafe { safe_slice(shape_ptr, shape_len) };
     let shape = Shape::new(dims.to_vec());
     match Tensor::zeros(&shape, convert_dtype(dtype), dev) {
         Ok(t) => box_tensor(t),
@@ -79,7 +88,7 @@ pub unsafe extern "C" fn mlxrs_ones(
     shape_len: size_t,
 ) -> *mut mlx_tensor_t {
     let dev = unsafe { ref_device(device) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
+    let dims = unsafe { safe_slice(shape_ptr, shape_len) };
     let shape = Shape::new(dims.to_vec());
     match Tensor::ones(&shape, convert_dtype(dtype), dev) {
         Ok(t) => box_tensor(t),
@@ -96,8 +105,8 @@ pub unsafe extern "C" fn mlxrs_from_f32(
     data_len: size_t,
 ) -> *mut mlx_tensor_t {
     let dev = unsafe { ref_device(device) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
-    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len) };
+    let dims = unsafe { safe_slice(shape_ptr, shape_len) };
+    let data = unsafe { safe_slice(data_ptr, data_len) };
     let shape = Shape::new(dims.to_vec());
     match Tensor::from_f32(data, &shape, dev) {
         Ok(t) => box_tensor(t),
@@ -180,7 +189,7 @@ pub unsafe extern "C" fn mlxrs_reshape(
     shape_len: size_t,
 ) -> *mut mlx_tensor_t {
     let a = unsafe { ref_tensor(a) };
-    let dims = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len) };
+    let dims = unsafe { safe_slice(shape_ptr, shape_len) };
     let new_shape = Shape::new(dims.to_vec());
     match a.reshape(&new_shape) {
         Ok(t) => box_tensor(t),
@@ -225,9 +234,11 @@ pub unsafe extern "C" fn mlxrs_to_f32_vec(
     let t = unsafe { ref_tensor(t) };
     match t.to_vec_f32() {
         Ok(data) => {
-            let copy_len = data.len().min(out_len);
+            if out_len < data.len() {
+                return -2; // buffer too small
+            }
             unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), out_ptr, copy_len);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), out_ptr, data.len());
             }
             0 // success
         }
@@ -255,11 +266,16 @@ pub unsafe extern "C" fn mlxrs_shape(
 ) -> c_int {
     let t = unsafe { ref_tensor(t) };
     let dims = &t.shape().0;
-    let copy_len = dims.len().min(out_len);
+    let needed = dims.len();
+    let copy_len = needed.min(out_len);
     unsafe {
         std::ptr::copy_nonoverlapping(dims.as_ptr(), out_ptr, copy_len);
     }
-    0
+    if out_len < needed {
+        needed as c_int // signal that buffer was too small
+    } else {
+        0
+    }
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
