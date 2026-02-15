@@ -41,6 +41,7 @@ impl Backend for CpuRefBackend {
             OpKind::Mean { axis } => reduce_mean(inputs, *axis),
             OpKind::Max { axis } => reduce_max(inputs, *axis),
             OpKind::MatMul => matmul(inputs),
+            OpKind::Embedding => embedding_lookup(inputs, output_meta),
             OpKind::Reshape { .. } => {
                 let a = require_input(inputs, 0)?;
                 Ok(a.data.to_vec())
@@ -305,6 +306,27 @@ fn softmax(inputs: &[NodeInput<'_>], axis: i32) -> Result<Vec<f32>> {
         }
     }
     Ok(data)
+}
+
+fn embedding_lookup(inputs: &[NodeInput<'_>], output_meta: &TensorMeta) -> Result<Vec<f32>> {
+    let weight = require_input(inputs, 0)?;
+    let indices = require_input(inputs, 1)?;
+    if weight.shape.ndim() != 2 {
+        return Err(MlxError::InvalidArgument(
+            "Embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+        ));
+    }
+    let num_embeddings = weight.shape.0[0] as usize;
+    let embedding_dim = weight.shape.0[1] as usize;
+    let mut result = vec![0.0f32; output_meta.shape.numel() as usize];
+    for (i, &idx_f) in indices.data.iter().enumerate() {
+        let idx = idx_f as i32;
+        let row = idx.clamp(0, num_embeddings as i32 - 1) as usize;
+        let src = row * embedding_dim;
+        let dst = i * embedding_dim;
+        result[dst..dst + embedding_dim].copy_from_slice(&weight.data[src..src + embedding_dim]);
+    }
+    Ok(result)
 }
 
 fn layer_norm(inputs: &[NodeInput<'_>], eps: f32, _meta: &TensorMeta) -> Result<Vec<f32>> {
