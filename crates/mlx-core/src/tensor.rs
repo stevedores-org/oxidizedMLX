@@ -102,8 +102,16 @@ impl Tensor {
         })
     }
 
-    /// Create a tensor from a `Vec<f32>`.
-    pub fn from_vec(data: Vec<f32>, shape: &Shape, device: &Device) -> Result<Self> {
+    /// Create a tensor from f32 data with a specified dtype.
+    ///
+    /// The data is stored as f32 internally; `dtype` records the logical type
+    /// (e.g. F16 weights that were converted to f32 on load).
+    pub fn from_data_with_dtype(
+        data: Vec<f32>,
+        shape: &Shape,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
         let expected = shape.numel() as usize;
         if data.len() != expected {
             return Err(MlxError::InvalidArgument(format!(
@@ -113,7 +121,7 @@ impl Tensor {
                 expected,
             )));
         }
-        Self::from_data(data, shape, DType::F32, device)
+        Self::from_data(data, shape, dtype, device)
     }
 
     fn from_data(data: Vec<f32>, shape: &Shape, dtype: DType, device: &Device) -> Result<Self> {
@@ -283,6 +291,27 @@ impl Tensor {
             OpKind::MatMul,
             SmallVec::from_slice(&[self.node_id, rhs.node_id]),
             Shape::new(vec![m, n]),
+            self.dtype,
+        ))
+    }
+
+    /// Embedding lookup: index into rows of this tensor (weight [num_embeddings, embedding_dim])
+    /// by integer indices. `indices` is a tensor of shape `[*]` whose elements are treated as
+    /// integer indices (passed as f32; values 0, 1, …). Output shape is `[*, embedding_dim]`.
+    pub fn embedding_lookup(&self, indices: &Tensor) -> Result<Tensor> {
+        if self.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+            ));
+        }
+        let _num_embeddings = self.shape.0[0];
+        let embedding_dim = self.shape.0[1];
+        let mut out_shape = indices.shape.0.clone();
+        out_shape.push(embedding_dim);
+        Ok(self.lazy_op(
+            OpKind::Embedding,
+            SmallVec::from_slice(&[self.node_id, indices.node_id]),
+            Shape::new(out_shape),
             self.dtype,
         ))
     }

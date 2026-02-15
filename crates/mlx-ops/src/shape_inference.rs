@@ -209,6 +209,25 @@ pub fn infer_shape(op: &OpKind, inputs: &[&Shape]) -> Result<Shape, ShapeError> 
             Ok(Shape::new(vec![tq, dh]))
         }
 
+        // Embedding: weight [num_embeddings, embedding_dim], indices [*] -> [*, embedding_dim].
+        OpKind::Embedding => {
+            let weight = inputs.first().ok_or(ShapeError::Mismatch(
+                "Embedding missing weight (input 0)".into(),
+            ))?;
+            let indices = inputs.get(1).ok_or(ShapeError::Mismatch(
+                "Embedding missing indices (input 1)".into(),
+            ))?;
+            if weight.ndim() != 2 {
+                return Err(ShapeError::Mismatch(
+                    "Embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+                ));
+            }
+            let embedding_dim = weight.0[1];
+            let mut out_shape = indices.0.clone();
+            out_shape.push(embedding_dim);
+            Ok(Shape::new(out_shape))
+        }
+
         // Transpose: permute dimensions.
         OpKind::Transpose { axes } => {
             let a = inputs
