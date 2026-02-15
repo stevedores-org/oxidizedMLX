@@ -79,7 +79,7 @@
         # Workspace tests
         workspaceTests = craneLib.cargoNextest (commonArgs // {
           inherit cargoArtifacts;
-          cargoNextestExtraArgs = "--workspace --exclude mlx-sys --exclude mlx-conformance";
+          cargoNextestExtraArgs = "--workspace --exclude mlx-sys";
         });
 
         # Format check
