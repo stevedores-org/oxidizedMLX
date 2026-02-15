@@ -47,7 +47,7 @@ pub fn gemm_fp16(
             height: ((p.m + 15) / 16) as u64,
             depth: 1,
         };
-        encoder.dispatch_threadgroups(grid, tg);
+        encoder.dispatch_thread_groups(grid, tg);
         encoder.end_encoding();
         Ok(())
     })
@@ -93,7 +93,7 @@ pub fn gemm_fp16_b_transposed(
             height: ((p.m + 15) / 16) as u64,
             depth: 1,
         };
-        encoder.dispatch_threadgroups(grid, tg);
+        encoder.dispatch_thread_groups(grid, tg);
         encoder.end_encoding();
         Ok(())
     })

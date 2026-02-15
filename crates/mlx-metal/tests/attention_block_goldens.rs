@@ -19,7 +19,18 @@ mod tests {
     }
 
     fn load_case(name: &str) -> Golden {
-        let path: PathBuf = ["tools", "goldens", "attn", name, "golden.json"].iter().collect();
+        let path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "..",
+            "tools",
+            "goldens",
+            "attn",
+            name,
+            "golden.json",
+        ]
+        .iter()
+        .collect();
         let data = fs::read_to_string(path).expect("read golden");
         serde_json::from_str(&data).expect("parse golden")
     }

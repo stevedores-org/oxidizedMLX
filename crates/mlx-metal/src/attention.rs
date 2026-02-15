@@ -88,7 +88,7 @@ fn softmax_masked_fp16(
 
         let tg = metal::MTLSize { width: 256, height: 1, depth: 1 };
         let grid = metal::MTLSize { width: p.tq as u64, height: 1, depth: 1 };
-        encoder.dispatch_threadgroups(grid, tg);
+        encoder.dispatch_thread_groups(grid, tg);
         encoder.end_encoding();
         Ok(())
     })
