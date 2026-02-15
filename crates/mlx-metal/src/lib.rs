@@ -27,7 +27,7 @@ pub use unified::{HostAllocation, UnifiedBuffer};
 
 #[cfg(not(target_os = "macos"))]
 mod stubs {
-    use crate::{MetalError, Result};
+    use crate::Result;
 
     /// Stub context for non-macOS platforms.
     #[derive(Clone, Copy)]
@@ -35,7 +35,7 @@ mod stubs {
 
     impl MetalContext {
         pub fn new() -> Result<Self> {
-            Err(MetalError::NoDevice)
+            Err(crate::MetalError::NoDevice)
         }
 
         pub fn device_name(&self) -> String {
@@ -43,7 +43,7 @@ mod stubs {
         }
 
         pub fn run_add_u32(&self, _a: &[u32], _b: &[u32]) -> Result<Vec<u32>> {
-            Err(MetalError::NoDevice)
+            Err(crate::MetalError::NoDevice)
         }
     }
 
@@ -54,7 +54,7 @@ mod stubs {
 
     impl<T> MetalBuffer<T> {
         pub fn from_slice_shared(_ctx: &MetalContext, _data: &[T]) -> Result<Self> {
-            Err(MetalError::NoDevice)
+            Err(crate::MetalError::NoDevice)
         }
 
         pub fn read_to_vec(&self) -> Vec<T> {
