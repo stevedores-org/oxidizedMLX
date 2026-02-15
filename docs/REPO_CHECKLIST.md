@@ -2,6 +2,36 @@
 
 This checklist validates progress aligned with the Strangler Fig approach and the [Delivery Plan](DELIVERY_PLAN.md).
 
+## Implementation status snapshot
+
+- **Metal kernels:** 3 of ~15 ops — Only Add, MatMul, RoPE have Metal dispatch. Sub/Mul/Div/Neg/Softmax/Silu/Gelu/LayerNorm/RmsNorm/Sum/Mean/Max/Transpose/Broadcast all fall back to error.
+- **NN modules:** 3 of 7 — Linear, LayerNorm, RmsNorm done. Missing: Embedding, MultiHeadAttention, Dropout, Conv.
+
+### Medium priority — not started / partial
+
+| Item                | Status                 | Notes                                                                 |
+|---------------------|------------------------|-----------------------------------------------------------------------|
+| Python conformance CI | Tools exist, not wired | `tools/py_ref_runner/` has runner + golden gen, but no CI step         |
+| Concurrency tests   | Minimal                | One lifecycle stress test, no threading                               |
+| LR schedulers       | Not started            | Nothing in mlx-optim beyond SGD/AdamW                                 |
+
+### Lower priority — not started
+
+| Item                                   | Status      |
+|----------------------------------------|-------------|
+| vmap / jvp / higher-order grad         | Not started |
+| Graph optimizations (fusion, checkpointing) | Not started |
+| Unified Buffer (replace Vec<f32>)      | Not started |
+| Performance (SIMD, rayon, flash attention) | Benchmark scaffold only, no actual optimization |
+
+### Biggest bang-for-buck next items
+
+1. **Metal elementwise kernels (Sub/Mul/Div/Neg)** — straightforward, same pattern as Add
+2. **Embedding layer** — needed for any LLM inference
+3. **Safetensors loading** — needed to load any pretrained model
+
+---
+
 ## 0) Repo baseline and contributor DX (Epic 0 / M0)
 
 * [x] **Fresh clone → `just ci` passes** without `MLX_SRC` (default path excludes FFI). ([GitHub][1])

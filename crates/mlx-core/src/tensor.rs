@@ -248,6 +248,27 @@ impl Tensor {
         ))
     }
 
+    /// Embedding lookup: index into rows of this tensor (weight [num_embeddings, embedding_dim])
+    /// by integer indices. `indices` is a tensor of shape `[*]` whose elements are treated as
+    /// integer indices (passed as f32; values 0, 1, …). Output shape is `[*, embedding_dim]`.
+    pub fn embedding_lookup(&self, indices: &Tensor) -> Result<Tensor> {
+        if self.shape.ndim() != 2 {
+            return Err(MlxError::InvalidArgument(
+                "embedding weight must be 2D [num_embeddings, embedding_dim]".into(),
+            ));
+        }
+        let _num_embeddings = self.shape.0[0];
+        let embedding_dim = self.shape.0[1];
+        let mut out_shape = indices.shape.0.clone();
+        out_shape.push(embedding_dim);
+        Ok(self.lazy_op(
+            OpKind::Embedding,
+            SmallVec::from_slice(&[self.node_id, indices.node_id]),
+            Shape::new(out_shape),
+            self.dtype,
+        ))
+    }
+
     // ── Shape manipulation ──────────────────────────────────────────────
 
     /// Reshape the tensor.
