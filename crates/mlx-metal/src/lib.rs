@@ -68,5 +68,5 @@ pub fn run_add_u32(a: &[u32], b: &[u32]) -> Result<Vec<u32>> {
 /// Non-macOS stub for `run_add_u32`.
 #[cfg(not(target_os = "macos"))]
 pub fn run_add_u32(_a: &[u32], _b: &[u32]) -> Result<Vec<u32>> {
-    Err(MlxError::BackendUnavailable("metal (macOS only)"))
+    Err(mlx_core::MlxError::BackendUnavailable("metal (macOS only)"))
 }
