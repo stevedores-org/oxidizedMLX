@@ -4,6 +4,8 @@
 //! sharing on Apple Silicon via Metal and a minimal runtime for GPU dispatch.
 
 #[cfg(target_os = "macos")]
+mod attention;
+#[cfg(target_os = "macos")]
 mod backend;
 #[cfg(target_os = "macos")]
 mod buffers;
@@ -16,6 +18,8 @@ pub mod instrument;
 #[cfg(target_os = "macos")]
 mod pipeline;
 #[cfg(target_os = "macos")]
+pub mod rope;
+#[cfg(target_os = "macos")]
 pub mod unified;
 
 #[cfg(target_os = "macos")]
@@ -26,6 +30,8 @@ pub use buffers::MetalBuffer;
 pub use context::MetalContext;
 #[cfg(target_os = "macos")]
 pub use instrument::BufferTelemetry;
+#[cfg(target_os = "macos")]
+pub use rope::RopeParams;
 #[cfg(target_os = "macos")]
 pub use unified::{HostAllocation, UnifiedBuffer};
 
