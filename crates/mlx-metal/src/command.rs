@@ -82,7 +82,7 @@ pub(crate) fn run_softmax_f32_impl(
     if numel == 0 {
         return Ok(Vec::new());
     }
-    if numel % row_size != 0 {
+    if !numel.is_multiple_of(row_size) {
         return Err(MetalError::InvalidArgument(format!(
             "input length {} not divisible by row_size {}",
             numel, row_size
