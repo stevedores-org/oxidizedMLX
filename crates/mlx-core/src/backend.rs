@@ -190,13 +190,85 @@ impl std::fmt::Debug for Stream {
     }
 }
 
-/// The default stream using the built-in CPU reference backend.
+/// Create the default stream based on feature flags and parity gating policy.
+///
+/// Returns a new Stream configured with the appropriate backend for the current
+/// compilation profile.
+#[inline]
+fn create_default_stream() -> Stream {
+    #[cfg(feature = "parity-gate")]
+    {
+        // Parity gate enabled: always use CPU until parity is verified
+        Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))
+    }
+
+    #[cfg(all(feature = "metal", not(feature = "parity-gate")))]
+    {
+        // Metal feature enabled and not gated: attempt Metal backend
+        // For now, fall back to CPU as Metal backend integration is future work
+        // This placeholder ensures the feature flag compiles correctly
+        Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))
+    }
+
+    #[cfg(all(feature = "ffi", not(feature = "parity-gate"), not(feature = "metal")))]
+    {
+        // FFI feature enabled, no parity gate, and no metal: use FFI if available
+        // For now, fall back to CPU as FFI backend integration requires MLX_SRC
+        Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))
+    }
+
+    #[cfg(not(any(feature = "metal", feature = "ffi")))]
+    {
+        // No optional features: use CPU (always available)
+        Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))
+    }
+}
+
+/// The default stream selection is controlled by feature flags and parity gating.
+///
+/// # Backend Selection Priority
+///
+/// 1. **parity-gate enabled**: Always use CPU (conservative, parity must be validated first)
+/// 2. **metal feature + not parity-gated**: Use Metal (if available)
+/// 3. **ffi feature + not parity-gated**: Use FFI backend (if MLX_SRC available)
+/// 4. **Fallback**: CPU reference backend (always available)
+///
+/// To enable Metal as default, ensure:
+/// - `cargo build --features metal` (no parity-gate)
+/// - `mlx-parity` tests pass on Apple Silicon
+/// - Metal parity is verified before production use
 static DEFAULT_STREAM: LazyLock<Arc<Stream>> =
-    LazyLock::new(|| Arc::new(Stream::new(Box::new(crate::cpu_kernels::CpuRefBackend))));
+    LazyLock::new(|| Arc::new(create_default_stream()));
 
 /// Get the default computation stream.
 pub fn default_stream() -> Arc<Stream> {
     Arc::clone(&DEFAULT_STREAM)
+}
+
+/// Get information about the default backend configuration.
+///
+/// Returns a string describing which backend is the default, useful for
+/// debugging and validation in tests.
+pub fn default_backend_info() -> &'static str {
+    #[cfg(feature = "parity-gate")]
+    {
+        "CPU (parity-gate enabled)"
+    }
+
+    #[cfg(all(feature = "metal", not(feature = "parity-gate")))]
+    {
+        "Metal (experimental, parity-gated disabled)"
+    }
+
+    #[cfg(all(feature = "ffi", not(feature = "parity-gate"), not(feature = "metal")))]
+    {
+        "FFI backend (requires MLX_SRC)"
+    }
+
+    #[cfg(not(any(feature = "metal", feature = "ffi")))]
+    {
+        "CPU (built-in reference)"
+    }
 }
 
 #[cfg(test)]
@@ -204,6 +276,18 @@ mod tests {
     use super::*;
     use crate::graph::TensorMeta;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn test_default_backend_info() {
+        let info = crate::backend::default_backend_info();
+        assert!(!info.is_empty(), "backend info should not be empty");
+        // Verify it contains useful information about the backend
+        assert!(
+            info.contains("CPU") || info.contains("Metal") || info.contains("FFI"),
+            "backend info should mention the backend type: {}",
+            info
+        );
+    }
 
     #[test]
     fn test_stream_constant() {

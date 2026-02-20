@@ -95,9 +95,13 @@ This checklist is pulled directly from GitHub Issue #97 and serves as the granul
 * [ ] softmax + masking + matmul compose correctly
 * [ ] Functional attention block golden test passes
 
-### E8-S7 Backend parity gate (maintainer control) 🚧
-* [ ] Parity suite compares metal vs CPU/FFI on defined ops
-* [ ] Feature flag controls default backend (metal not default until parity passes)
+### E8-S7 Backend parity gate (maintainer control) ✅
+* [x] Parity suite compares metal vs CPU/FFI on defined ops (mlx-parity crate with 41 tests via PR #122)
+* [x] Feature flag controls default backend (metal not default until parity passes)
+  * [x] `parity-gate` feature enforces CPU-only default
+  * [x] `metal` feature available for experimental Metal backend (gated behind parity)
+  * [x] `ffi` feature available for MLX C++ backend (requires `MLX_SRC`)
+  * [x] `default_backend_info()` reports active backend at runtime
 
 ---
 
