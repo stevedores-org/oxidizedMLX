@@ -767,6 +767,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mlx-parity"
+version = "0.1.0"
+dependencies = [
+ "mlx-conformance",
+ "mlx-core",
+ "mlx-cpu",
+ "mlx-metal",
+ "smallvec",
+]
+
+[[package]]
 name = "mlx-roadmap"
 version = "0.1.0"
 dependencies = [
