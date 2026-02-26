@@ -51,7 +51,7 @@ fn quantize_int4(data: &[f32]) -> (Vec<u8>, f32, f32) {
     let zero_point = min;
 
     // Pack two 4-bit values per byte
-    let mut packed = Vec::with_capacity((data.len() + 1) / 2);
+    let mut packed = Vec::with_capacity(data.len().div_ceil(2));
     for chunk in data.chunks(2) {
         let lo = ((chunk[0] - zero_point) / scale).round().clamp(0.0, 15.0) as u8;
         let hi = if chunk.len() > 1 {
@@ -185,7 +185,7 @@ fn quantize_dtype_size_sanity() {
     let f32_bytes = n_elements * DType::F32.size_bytes();
     let f16_bytes = n_elements * DType::F16.size_bytes();
     let i8_bytes = n_elements; // 1 byte per element
-    let i4_bytes = (n_elements + 1) / 2; // 0.5 bytes per element
+    let i4_bytes = n_elements.div_ceil(2); // 0.5 bytes per element
 
     assert_eq!(f32_bytes, 4096);
     assert_eq!(f16_bytes, 2048);

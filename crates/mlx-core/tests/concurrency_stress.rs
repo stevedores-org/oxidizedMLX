@@ -130,7 +130,7 @@ fn concurrent_independent_graphs_no_interference() {
 
     for (tid, r) in results.iter().enumerate() {
         let val = (tid + 1) as f32;
-        let expected = vec![val * 2.0, val * 4.0, val * 6.0];
+        let expected = [val * 2.0, val * 4.0, val * 6.0];
         for (j, (got, exp)) in r.iter().zip(expected.iter()).enumerate() {
             assert!(
                 (got - exp).abs() < 1e-6,
