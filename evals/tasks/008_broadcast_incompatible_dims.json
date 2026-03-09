@@ -1,0 +1,18 @@
+{
+  "id": "008_broadcast_incompatible_dims",
+  "title": "Broadcast check returns wrong error for incompatible shapes",
+  "issue": 94,
+  "fix_commit": "h0k6j89",
+  "description": "When broadcasting tensors with incompatible dimensions, the error message is misleading or incorrect. For example, shapes [3] and [4] cannot be broadcast together, but the current implementation may give a confusing error or incorrect compatibility check. The function should properly validate that dimensions either match or one is 1.",
+  "context_files": [
+    {
+      "path": "crates/mlx-core/src/tensor.rs",
+      "lines": [1500, 1530],
+      "annotation": "broadcast_to method implementation"
+    }
+  ],
+  "test_filters": ["test_broadcast_incompatible_dims"],
+  "test_crates": ["mlx-core"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-core/src/tensor.rs\n+++ b/crates/mlx-core/src/tensor.rs\n@@ -1505,6 +1505,17 @@ impl Tensor {\n     /// Broadcast tensor to target shape.\n     pub fn broadcast_to(&self, shape: &Shape) -> Result<Tensor> {\n+        for (i, (s, &t)) in self.shape().dims().iter().zip(shape.dims()).enumerate() {\n+            if s != &t && s != &1 {\n+                return Err(\n+                    format!(\n+                        \"cannot broadcast dimension {} from {} to {}\",\n+                        i, s, t\n+                    )\n+                    .into()\n+                );\n+            }\n+        }\n         // existing implementation\n         Ok(Tensor::default())\n     }\n"
+}

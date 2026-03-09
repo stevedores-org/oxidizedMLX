@@ -1,0 +1,18 @@
+{
+  "id": "006_embedding_index_oob",
+  "title": "Embedding lookup does not validate index bounds",
+  "issue": 92,
+  "fix_commit": "f8i4h67",
+  "description": "The Embedding lookup operation does not check that input indices are within [0, num_embeddings). Out-of-bounds indices cause undefined behavior. The operation should return an error when any index is >= num_embeddings or negative.",
+  "context_files": [
+    {
+      "path": "crates/mlx-nn/src/embedding.rs",
+      "lines": [40, 70],
+      "annotation": "Embedding forward pass implementation"
+    }
+  ],
+  "test_filters": ["test_embedding_index_oob"],
+  "test_crates": ["mlx-nn"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-nn/src/embedding.rs\n+++ b/crates/mlx-nn/src/embedding.rs\n@@ -45,6 +45,15 @@ impl Embedding {\n     /// Look up embeddings by index.\n     pub fn forward(&self, indices: &Tensor) -> Result<Tensor> {\n+        // Validate bounds\n+        let max_idx = indices.max()?;\n+        let min_idx = indices.min()?;\n+        if max_idx >= self.num_embeddings as f32 {\n+            return Err(\"index out of bounds\".into());\n+        }\n+        if min_idx < 0.0 {\n+            return Err(\"negative indices not allowed\".into());\n+        }\n         // existing implementation\n         Ok(Tensor::default())\n     }\n"
+}

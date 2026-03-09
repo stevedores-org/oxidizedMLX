@@ -46,3 +46,31 @@ bench:
 # Create GitHub labels/milestones/epic issues for the delivery plan (idempotent).
 roadmap-bootstrap:
     cargo run -p mlx-roadmap -- bootstrap
+
+# Build mlx-bench CLI
+bench-build:
+    cargo build -p mlx-bench
+
+# List all evaluation tasks
+bench-list:
+    cargo run -p mlx-bench -- list-tasks
+
+# Run self-test on golden patches
+bench-self-test:
+    cargo run -p mlx-bench -- self-test
+
+# Run SWE-Bench with local MLX backend
+bench-local model:
+    cargo run -p mlx-bench -- run --backend local --model {{model}}
+
+# Run SWE-Bench with Anthropic API
+bench-anthropic:
+    cargo run -p mlx-bench -- run --backend anthropic --model claude-3-5-sonnet-20241022
+
+# Generate report from latest results
+bench-report:
+    cargo run -p mlx-bench -- report --latest --format table
+
+# Dry-run a specific task
+bench-dry task_id:
+    cargo run -p mlx-bench -- run --backend debug --filter {{task_id}} --dry-run

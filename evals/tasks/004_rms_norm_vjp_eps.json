@@ -1,0 +1,18 @@
+{
+  "id": "004_rms_norm_vjp_eps",
+  "title": "RmsNorm gradient incorrectly handles epsilon",
+  "issue": 90,
+  "fix_commit": "d6g2f45",
+  "description": "The vector-jacobian product (vjp) implementation for RmsNorm does not properly apply the epsilon value during gradient computation. The epsilon should be used consistently between forward and backward passes to prevent numerical instability. Currently, the backward pass omits or misapplies epsilon.",
+  "context_files": [
+    {
+      "path": "crates/mlx-nn/src/rms_norm.rs",
+      "lines": [60, 100],
+      "annotation": "RmsNorm vjp implementation"
+    }
+  ],
+  "test_filters": ["test_rms_norm_vjp_eps"],
+  "test_crates": ["mlx-nn"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-nn/src/rms_norm.rs\n+++ b/crates/mlx-nn/src/rms_norm.rs\n@@ -70,7 +70,11 @@ impl RmsNorm {\n     /// Vector-jacobian product for RmsNorm\n     pub fn vjp(&self, grad_output: &Tensor, epsilon: f32) -> Result<Tensor> {\n         // Scale gradient by RMS with epsilon\n-        let rms = (grad_output.pow(2.0)?.mean()?);\n+        let rms = (\n+            (grad_output.pow(2.0)?\n+                .add(&Tensor::full_like(grad_output, epsilon)?))?\n+                .sqrt()?\n+        );\n         grad_output.div(&rms)\n     }\n"
+}

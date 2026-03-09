@@ -1,0 +1,99 @@
+name: SWE-Bench Evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: "Backend to use (anthropic or local)"
+        required: true
+        default: "anthropic"
+        type: choice
+        options:
+          - anthropic
+          - local
+      model:
+        description: "Model ID for LLM"
+        required: true
+        default: "claude-3-5-sonnet-20241022"
+      attempts:
+        description: "Number of attempts per task"
+        required: true
+        default: "1"
+        type: string
+
+jobs:
+  swe-bench:
+    name: Run SWE-Bench Evaluation
+    runs-on: macos-latest
+
+    # Gate on API key availability
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mlx-bench
+        run: cargo build -p mlx-bench --release
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          pip install anthropic
+
+      - name: Validate tasks
+        run: cargo run -p mlx-bench --release -- validate-tasks
+
+      - name: Run self-test (golden patches)
+        run: cargo run -p mlx-bench --release -- self-test
+
+      - name: Run SWE-Bench evaluation
+        run: |
+          cargo run -p mlx-bench --release -- run \
+            --backend ${{ github.event.inputs.backend }} \
+            --model "${{ github.event.inputs.model }}" \
+            --attempts "${{ github.event.inputs.attempts }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Generate report
+        run: cargo run -p mlx-bench --release -- report --latest --format markdown
+
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: swe-bench-results
+          path: evals/results/
+          retention-days: 90
+
+      - name: Comment on workflow run
+        run: |
+          cargo run -p mlx-bench --release -- report --latest --format table >> $GITHUB_STEP_SUMMARY

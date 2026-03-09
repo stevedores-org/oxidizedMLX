@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Dependabot is disabled for all dependency managers
+  # Dependencies are managed manually to maintain quality and compatibility
+
+  # Uncomment below to enable Cargo dependency updates
+  # - package-ecosystem: "cargo"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+
+  # Uncomment below to enable GitHub Actions updates
+  # - package-ecosystem: "github-actions"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+
+  # Note: npm/Node.js is NOT used in this project (see CLAUDE.md)
