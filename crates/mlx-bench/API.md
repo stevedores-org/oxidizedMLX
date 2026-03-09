@@ -391,14 +391,14 @@ let opts = BackendOpts {
 
 ### backend::LocalMlxBackend
 
-Local MLX backend using `mlx_lm`.
+Local MLX backend using Apple Silicon Metal GPU. Currently a placeholder awaiting `mlx-rs` Rust bindings.
 
 ```rust
 pub struct LocalMlxBackend { /* private */ }
 
 impl LocalMlxBackend {
     /// Create new local MLX backend
-    pub fn new(python_script: impl AsRef<Path>) -> Result<Self>;
+    pub fn new(model_id: impl Into<String>) -> Self;
 }
 
 impl LlmBackend for LocalMlxBackend { ... }
@@ -408,32 +408,50 @@ impl LlmBackend for LocalMlxBackend { ... }
 ```rust
 use mlx_bench::backend::LocalMlxBackend;
 
-let backend = LocalMlxBackend::new("evals/backends/mlx_local.py")?;
+let backend = LocalMlxBackend::new("deepseek-coder-1.3b");
 println!("Backend: {}", backend.name());  // "local"
+// Will return error indicating mlx-rs bindings are required
 ```
 
 ### backend::AnthropicApiBackend
 
-Anthropic API backend.
+Anthropic API backend using direct async HTTP calls with `reqwest` and `tokio`.
 
 ```rust
 pub struct AnthropicApiBackend { /* private */ }
 
 impl AnthropicApiBackend {
     /// Create new Anthropic backend
-    pub fn new(python_script: impl AsRef<Path>) -> Result<Self>;
+    ///
+    /// Reads API key from ANTHROPIC_API_KEY environment variable.
+    pub fn new() -> Result<Self>;
 }
 
 impl LlmBackend for AnthropicApiBackend { ... }
 ```
 
+**Tokio Runtime Details:**
+
+The `AnthropicApiBackend` creates a new `tokio::runtime::Runtime` for each `generate_patch()` call. This is efficient for CLI usage where calls are sequential. However, note:
+
+- **CLI usage:** One runtime per call is fine (minimal overhead)
+- **Library usage:** For batch processing, consider caching the runtime
+- **Future enhancement:** Could accept a runtime parameter for library users
+
 **Example:**
 ```rust
 use mlx_bench::backend::AnthropicApiBackend;
 
-let backend = AnthropicApiBackend::new("evals/backends/anthropic_api.py")?;
+// Requires ANTHROPIC_API_KEY environment variable
+let backend = AnthropicApiBackend::new()?;
 println!("Backend: {}", backend.name());  // "anthropic"
+
+// The backend will call the Anthropic API and return a patch
+let patch = backend.generate_patch(&task, &opts)?;
 ```
+
+**Performance Note:**
+Creating a tokio runtime costs ~1-5ms per call in typical scenarios. For high-frequency library usage (thousands of concurrent calls), pre-create a runtime and pass it to the backend. See ARCHITECTURE.md for potential future enhancements.
 
 ### backend::StdinDebugBackend
 

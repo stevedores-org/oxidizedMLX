@@ -118,6 +118,7 @@ async fn generate_patch_async(
     #[derive(Deserialize)]
     struct ContentBlock {
         #[serde(rename = "type")]
+        #[allow(dead_code)]
         content_type: String,
         text: Option<String>,
     }
@@ -144,6 +145,7 @@ async fn generate_patch_async(
 
 /// Local MLX backend for Apple Silicon inference
 pub struct LocalMlxBackend {
+    #[allow(dead_code)]
     model_id: String,
 }
 
@@ -156,7 +158,7 @@ impl LocalMlxBackend {
 }
 
 impl LlmBackend for LocalMlxBackend {
-    fn generate_patch(&self, task: &EvalTask, opts: &BackendOpts) -> Result<String> {
+    fn generate_patch(&self, _task: &EvalTask, _opts: &BackendOpts) -> Result<String> {
         // Local inference would use mlx-rs bindings
         // For now, return a placeholder error indicating this would be implemented with MLX Rust bindings
         Err(BenchError::Backend(
