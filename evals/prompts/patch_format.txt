@@ -1,0 +1,51 @@
+Unified Diff Format Reference
+
+A unified diff patch describes changes to files in a standardized format compatible with `git apply` and `patch` utilities.
+
+Basic Structure:
+--- a/path/to/file.rs
++++ b/path/to/file.rs
+@@ -start,count +start,count @@ context
+ unchanged line
+-removed line
++added line
+ unchanged line
+
+Rules:
+1. File headers:
+   - "--- a/path/to/file.rs" (original)
+   - "+++ b/path/to/file.rs" (modified)
+
+2. Hunk headers:
+   - "@@ -<line>,<count> +<line>,<count> @@" with optional function name
+   - Line numbers are 1-indexed
+   - Count is number of lines in the hunk
+
+3. Content lines:
+   - " " (space) = unchanged line
+   - "-" = removed line (from original)
+   - "+" = added line (in modified)
+
+4. Context:
+   - Include at least 3 unchanged lines before and after changes
+   - Helps git locate the patch even with minor differences
+
+5. Multiple files:
+   - Include multiple file sections in one patch
+   - Each file gets its own header and hunks
+
+Example for adding bounds check:
+
+--- a/crates/mlx-core/src/tensor.rs
++++ b/crates/mlx-core/src/tensor.rs
+@@ -120,6 +120,12 @@ impl Tensor {
+     /// Compute softmax along the specified axis.
+     pub fn softmax(&self, axis: i64) -> Result<Tensor> {
++        let ndim = self.shape().len() as i64;
++        if axis < -ndim || axis >= ndim {
++            return Err(BenchError::InvalidAxis);
++        }
++
+         // existing computation continues
+         let normalized = /* ... */;
+         Ok(normalized)

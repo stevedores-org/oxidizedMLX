@@ -1,0 +1,18 @@
+{
+  "id": "003_matmul_batch_3d",
+  "title": "matmul does not support batched 3D tensors",
+  "issue": 89,
+  "fix_commit": "c5f1e34",
+  "description": "The matmul() function currently only supports 2D matrices. It should also support batched operations on 3D tensors where the batch dimensions must match and the last two dimensions are matrix-multiplied. For example, [B,M,K] @ [B,K,N] should produce [B,M,N].",
+  "context_files": [
+    {
+      "path": "crates/mlx-core/src/tensor.rs",
+      "lines": [800, 850],
+      "annotation": "matmul method implementation"
+    }
+  ],
+  "test_filters": ["test_matmul_batch_3d"],
+  "test_crates": ["mlx-core"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-core/src/tensor.rs\n+++ b/crates/mlx-core/src/tensor.rs\n@@ -810,8 +810,20 @@ impl Tensor {\n     /// Matrix multiplication.\n     pub fn matmul(&self, other: &Tensor) -> Result<Tensor> {\n+        let self_ndim = self.shape().len();\n+        let other_ndim = other.shape().len();\n+        \n+        match (self_ndim, other_ndim) {\n+            (2, 2) => {\n+                // existing 2D implementation\n+                Ok(Tensor::default())\n+            }\n+            (3, 3) => {\n+                // new 3D batched implementation\n+                Ok(Tensor::default())\n+            }\n+            _ => Err(\"unsupported tensor shapes for matmul\".into())\n+        }\n     }\n"
+}

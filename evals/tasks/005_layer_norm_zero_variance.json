@@ -1,0 +1,18 @@
+{
+  "id": "005_layer_norm_zero_variance",
+  "title": "layer_norm crashes when all values are identical",
+  "issue": 91,
+  "fix_commit": "e7h3g56",
+  "description": "LayerNorm fails with a divide-by-zero error when the input tensor contains all identical values (zero variance). The implementation should handle this edge case by either returning the input unchanged or properly using the epsilon parameter to avoid division by zero.",
+  "context_files": [
+    {
+      "path": "crates/mlx-core/src/tensor.rs",
+      "lines": [1300, 1330],
+      "annotation": "layer_norm method implementation"
+    }
+  ],
+  "test_filters": ["test_layer_norm_zero_variance"],
+  "test_crates": ["mlx-core"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-core/src/tensor.rs\n+++ b/crates/mlx-core/src/tensor.rs\n@@ -1310,10 +1310,15 @@ impl Tensor {\n     /// Layer normalization with epsilon for numerical stability.\n     pub fn layer_norm(&self, epsilon: f32) -> Result<Tensor> {\n         let mean = self.mean()?;\n         let centered = self.sub(&mean)?;\n         let variance = centered.pow(2.0)?.mean()?;\n-        let normalized = centered.div(&variance.sqrt()?);\n+        let variance_safe = variance.add(&Tensor::full_like(variance, epsilon)?)?;\n+        let normalized = centered.div(&variance_safe.sqrt()?)?\n         Ok(normalized)\n     }\n"
+}

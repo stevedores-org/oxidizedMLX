@@ -1,0 +1,23 @@
+{
+  "id": "001_softmax_axis_oob",
+  "title": "softmax does not validate axis bounds",
+  "issue": 87,
+  "fix_commit": "a3f9c12",
+  "description": "The softmax() function in mlx-core does not properly validate that the axis parameter is within the bounds of the tensor's dimensions. This causes undefined behavior when an out-of-bounds axis is provided. The function should return an error when the provided axis is >= shape.len() or < -(shape.len() as i32).",
+  "context_files": [
+    {
+      "path": "crates/mlx-core/src/tensor.rs",
+      "lines": [1100, 1130],
+      "annotation": "softmax method implementation"
+    },
+    {
+      "path": "crates/mlx-core/src/lib.rs",
+      "lines": [1, 50],
+      "annotation": "module definitions"
+    }
+  ],
+  "test_filters": ["test_softmax_axis_oob"],
+  "test_crates": ["mlx-core"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-core/src/tensor.rs\n+++ b/crates/mlx-core/src/tensor.rs\n@@ -1120,6 +1120,14 @@ impl Tensor {\n     /// Compute softmax along the specified axis.\n     pub fn softmax(&self, axis: i64) -> Result<Tensor> {\n+        let ndim = self.shape().len() as i64;\n+        let normalized_axis = if axis < 0 {\n+            ndim + axis\n+        } else {\n+            axis\n+        };\n+        if normalized_axis < 0 || normalized_axis >= ndim {\n+            return Err(\"axis out of bounds\".into());\n+        }\n         // existing implementation\n         Ok(Tensor::default())\n     }\n"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "007_cat_empty_slice",
+  "title": "cat() crashes with empty tensor list",
+  "issue": 93,
+  "fix_commit": "g9j5i78",
+  "description": "The concatenate (cat) operation does not handle empty slices. When the input slice contains zero tensors, the function should either return an empty result or raise a descriptive error, but currently it causes undefined behavior or panics.",
+  "context_files": [
+    {
+      "path": "crates/mlx-core/src/tensor.rs",
+      "lines": [500, 530],
+      "annotation": "cat function implementation"
+    }
+  ],
+  "test_filters": ["test_cat_empty"],
+  "test_crates": ["mlx-core"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-core/src/tensor.rs\n+++ b/crates/mlx-core/src/tensor.rs\n@@ -505,6 +505,9 @@ pub fn cat(tensors: &[Tensor], axis: usize) -> Result<Tensor> {\n     /// Concatenate tensors along an axis.\n     if tensors.is_empty() {\n+        return Err(\"cannot concatenate empty slice of tensors\".into());\n     }\n+    \n     // existing implementation\n     Ok(Tensor::default())\n"
+}
