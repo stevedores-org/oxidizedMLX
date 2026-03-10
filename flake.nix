@@ -2,8 +2,8 @@
   description = "oxidizedMLX — Rust-first MLX runtime";
 
   nixConfig = {
-    extra-substituters = [ "https://nix-cache.stevedores.org/oxidizedmlx" ];
-    extra-trusted-public-keys = [ "oxidizedmlx-cache-1:uG3uzexkJno1b3b+dek7tHnHzr1p6MHxIoVTqnp/JBI=" ];
+    extra-substituters = [ "https://nix-cache.stevedores.org" ];
+    extra-trusted-public-keys = [ "stevedores-cache-1:bXLxkipycRWproIJnk8pPWNFdgVfeV+I2mJXCoW4/ag=" ];
   };
 
   inputs = {

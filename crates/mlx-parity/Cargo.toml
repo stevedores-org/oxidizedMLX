@@ -1,0 +1,14 @@
+[package]
+name = "mlx-parity"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mlx-core = { path = "../mlx-core" }
+mlx-cpu = { path = "../mlx-cpu" }
+mlx-metal = { path = "../mlx-metal" }
+mlx-conformance = { path = "../mlx-conformance" }
+smallvec = { workspace = true }
+
+[features]
+default-backend-metal = []
