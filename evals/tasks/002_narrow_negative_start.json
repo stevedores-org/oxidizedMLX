@@ -1,0 +1,18 @@
+{
+  "id": "002_narrow_negative_start",
+  "title": "narrow does not validate negative start index",
+  "issue": 88,
+  "fix_commit": "b4e0d23",
+  "description": "The narrow() function allows negative start indices without proper bounds checking. When start < 0, the function should return an error instead of attempting to narrow with an invalid index.",
+  "context_files": [
+    {
+      "path": "crates/mlx-core/src/tensor.rs",
+      "lines": [950, 980],
+      "annotation": "narrow method implementation"
+    }
+  ],
+  "test_filters": ["test_narrow_negative_start"],
+  "test_crates": ["mlx-core"],
+  "timeout_secs": 120,
+  "golden_patch": "--- a/crates/mlx-core/src/tensor.rs\n+++ b/crates/mlx-core/src/tensor.rs\n@@ -960,6 +960,9 @@ impl Tensor {\n     /// Narrow a tensor along a dimension.\n     pub fn narrow(&self, axis: usize, start: i64, length: i64) -> Result<Tensor> {\n+        if start < 0 {\n+            return Err(\"start must be non-negative\".into());\n+        }\n         // existing implementation\n         Ok(Tensor::default())\n     }\n"
+}

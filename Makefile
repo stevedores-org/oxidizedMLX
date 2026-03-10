@@ -12,19 +12,28 @@
 # The lci script mirrors GitHub Actions CI with file-hash caching
 # so unchanged stages are skipped on repeat runs.
 
-.PHONY: help lci lci-no-cache lci-ffi ci fmt-check clippy test test-ffi clippy-ffi
+.PHONY: help lci lci-no-cache lci-ffi ci fmt-check clippy test test-ffi clippy-ffi bench-build bench-list bench-self-test bench-local bench-anthropic bench-report bench-dry
 
 help:
 	@echo "Targets:"
-	@echo "  lci            Local CI with file-hash caching"
-	@echo "  lci-no-cache   Local CI (force all stages)"
-	@echo "  lci-ffi        Local CI including FFI (requires MLX_SRC)"
-	@echo "  ci             Alias for lci"
-	@echo "  fmt-check      cargo fmt --check"
-	@echo "  clippy         clippy (workspace, exclude mlx-sys)"
-	@echo "  test           tests (workspace, exclude mlx-sys and mlx-conformance)"
-	@echo "  test-ffi       tests including FFI (requires MLX_SRC)"
-	@echo "  clippy-ffi     clippy including FFI (requires MLX_SRC)"
+	@echo "  lci              Local CI with file-hash caching"
+	@echo "  lci-no-cache     Local CI (force all stages)"
+	@echo "  lci-ffi          Local CI including FFI (requires MLX_SRC)"
+	@echo "  ci               Alias for lci"
+	@echo "  fmt-check        cargo fmt --check"
+	@echo "  clippy           clippy (workspace, exclude mlx-sys)"
+	@echo "  test             tests (workspace, exclude mlx-sys and mlx-conformance)"
+	@echo "  test-ffi         tests including FFI (requires MLX_SRC)"
+	@echo "  clippy-ffi       clippy including FFI (requires MLX_SRC)"
+	@echo ""
+	@echo "SWE-Bench targets:"
+	@echo "  bench-build      Build mlx-bench CLI"
+	@echo "  bench-list       List all evaluation tasks"
+	@echo "  bench-self-test  Run self-test on golden patches"
+	@echo "  bench-local      Run SWE-Bench with local MLX backend"
+	@echo "  bench-anthropic  Run SWE-Bench with Anthropic API"
+	@echo "  bench-report     Generate report from latest results"
+	@echo "  bench-dry        Dry-run a specific task (TASK=id)"
 
 ci: lci
 
@@ -62,3 +71,26 @@ conformance:
 
 smoke:
 	cargo run -p mlx-cli -- smoke
+
+# SWE-Bench evaluation targets
+
+bench-build:
+	cargo build -p mlx-bench
+
+bench-list:
+	cargo run -p mlx-bench -- list-tasks
+
+bench-self-test:
+	cargo run -p mlx-bench -- self-test
+
+bench-local:
+	cargo run -p mlx-bench -- run --backend local --model $(MODEL)
+
+bench-anthropic:
+	cargo run -p mlx-bench -- run --backend anthropic --model claude-3-5-sonnet-20241022
+
+bench-report:
+	cargo run -p mlx-bench -- report --latest --format table
+
+bench-dry:
+	cargo run -p mlx-bench -- run --backend debug --filter $(TASK) --dry-run
