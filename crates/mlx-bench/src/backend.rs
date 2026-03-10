@@ -53,7 +53,10 @@ async fn generate_patch_async(
     opts: &BackendOpts,
     api_key: &str,
 ) -> Result<String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(opts.timeout_secs))
+        .build()
+        .map_err(|e| BenchError::Backend(format!("Failed to build HTTP client: {}", e)))?;
 
     // Assemble prompt
     let system_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
