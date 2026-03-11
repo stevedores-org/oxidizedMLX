@@ -4,7 +4,10 @@ use crate::task::EvalTask;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command as TokioCommand;
+use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,10 +64,16 @@ impl TaskRunner {
         backend: &dyn crate::backend::LlmBackend,
         opts: &BackendOpts,
     ) -> Result<Vec<TaskOutcome>> {
+        // Create tokio runtime once, reused across all attempts
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| BenchError::Backend(format!("Failed to create runtime: {}", e)))?;
+
         let mut outcomes = Vec::new();
 
         for attempt in 1..=self.config.max_attempts {
-            let outcome = self.run_attempt(task, backend, opts, attempt)?;
+            let outcome = self.run_attempt(&rt, task, backend, opts, attempt)?;
             outcomes.push(outcome);
         }
 
@@ -73,6 +82,7 @@ impl TaskRunner {
 
     fn run_attempt(
         &self,
+        rt: &Runtime,
         task: &EvalTask,
         backend: &dyn crate::backend::LlmBackend,
         opts: &BackendOpts,
@@ -92,52 +102,17 @@ impl TaskRunner {
             llm_output_tokens: None,
         };
 
-        // Step 1: Generate patch
+        // Step 1: Generate patch (sync call, outside block_on)
         match backend.generate_patch(task, opts) {
             Ok(patch) => {
                 outcome.patch_generated = true;
                 outcome.patch_text = Some(patch.clone());
 
-                // Step 2: Validate patch
-                if self.validate_patch(&patch).is_ok() {
-                    outcome.patch_valid = true;
-
-                    // Step 3: Apply patch
-                    if let Err(e) = self.apply_patch(&patch) {
-                        outcome.error = Some(format!("Patch application failed: {}", e));
-                        return Ok(outcome);
+                // Steps 2-6: Subprocess operations with timeouts (async)
+                if let Err(e) = rt.block_on(self.run_subprocess_steps(&mut outcome, task, &patch)) {
+                    if outcome.error.is_none() {
+                        outcome.error = Some(format!("Subprocess orchestration failed: {}", e));
                     }
-
-                    // Step 4: Build
-                    match self.run_build(task) {
-                        Ok(true) => {
-                            outcome.build_success = true;
-
-                            // Step 5: Test
-                            match self.run_tests(task) {
-                                Ok(true) => {
-                                    outcome.tests_passed = true;
-                                }
-                                Ok(false) => {
-                                    outcome.error = Some("Tests failed".to_string());
-                                }
-                                Err(e) => {
-                                    outcome.error = Some(format!("Test execution error: {}", e));
-                                }
-                            }
-                        }
-                        Ok(false) => {
-                            outcome.error = Some("Build failed".to_string());
-                        }
-                        Err(e) => {
-                            outcome.error = Some(format!("Build error: {}", e));
-                        }
-                    }
-
-                    // Step 6: Revert
-                    let _ = self.revert_changes();
-                } else {
-                    outcome.error = Some("Patch validation failed".to_string());
                 }
             }
             Err(e) => {
@@ -148,20 +123,85 @@ impl TaskRunner {
         Ok(outcome)
     }
 
-    fn validate_patch(&self, patch: &str) -> Result<()> {
-        use std::io::Write;
+    async fn run_subprocess_steps(
+        &self,
+        outcome: &mut TaskOutcome,
+        task: &EvalTask,
+        patch: &str,
+    ) -> Result<()> {
+        const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+        let build_timeout = Duration::from_secs(task.timeout_secs);
+
+        // Step 2: Validate patch
+        match tokio::time::timeout(GIT_TIMEOUT, self.validate_patch_async(patch)).await {
+            Ok(Ok(())) => outcome.patch_valid = true,
+            Ok(Err(e)) => {
+                outcome.error = Some(format!("{}", e));
+                return Ok(());
+            }
+            Err(_) => {
+                outcome.error = Some("Patch validation timed out".to_string());
+                return Ok(());
+            }
+        }
+
+        // Step 3: Apply patch
+        match tokio::time::timeout(GIT_TIMEOUT, self.apply_patch_async(patch)).await {
+            Ok(Ok(())) => {},
+            Ok(Err(e)) => {
+                outcome.error = Some(format!("Patch application failed: {}", e));
+                return Ok(());
+            }
+            Err(_) => {
+                outcome.error = Some("Patch application timed out".to_string());
+                return Ok(());
+            }
+        }
+
+        // Step 4: Build
+        match tokio::time::timeout(build_timeout, self.run_build_async(task)).await {
+            Ok(Ok(true)) => outcome.build_success = true,
+            Ok(Ok(false)) => {
+                outcome.error = Some("Build failed".to_string());
+                let _ = tokio::time::timeout(GIT_TIMEOUT, self.revert_changes_async()).await;
+                return Ok(());
+            }
+            Ok(Err(e)) => {
+                outcome.error = Some(format!("Build error: {}", e));
+                let _ = tokio::time::timeout(GIT_TIMEOUT, self.revert_changes_async()).await;
+                return Ok(());
+            }
+            Err(_) => {
+                outcome.error = Some("Build timed out".to_string());
+                let _ = tokio::time::timeout(GIT_TIMEOUT, self.revert_changes_async()).await;
+                return Ok(());
+            }
+        }
+
+        // Step 5: Test
+        match tokio::time::timeout(build_timeout, self.run_tests_async(task)).await {
+            Ok(Ok(true)) => outcome.tests_passed = true,
+            Ok(Ok(false)) => outcome.error = Some("Tests failed".to_string()),
+            Ok(Err(e)) => outcome.error = Some(format!("Test execution error: {}", e)),
+            Err(_) => outcome.error = Some("Tests timed out".to_string()),
+        }
+
+        // Step 6: Revert (best-effort)
+        let _ = tokio::time::timeout(GIT_TIMEOUT, self.revert_changes_async()).await;
+
+        Ok(())
+    }
+
+    async fn validate_patch_async(&self, patch: &str) -> Result<()> {
         use std::process::Stdio;
 
-        // Quick validation: check if it looks like a unified diff
-        // Stricter check: must start with "--- " and contain "\n+++ "
         if !patch.starts_with("--- ") || !patch.contains("\n+++ ") {
             return Err(BenchError::PatchValidation(
                 "Patch missing proper --- and +++ headers (unified diff format required)".to_string(),
             ));
         }
 
-        // Try git apply --check
-        let mut child = Command::new("git")
+        let mut child = TokioCommand::new("git")
             .arg("apply")
             .arg("--check")
             .current_dir(&self.config.workspace_root)
@@ -174,29 +214,27 @@ impl TaskRunner {
         if let Some(mut stdin) = child.stdin.take() {
             stdin
                 .write_all(patch.as_bytes())
+                .await
                 .map_err(|e| BenchError::Git(format!("Failed to write patch to stdin: {}", e)))?;
         }
 
         let output = child
             .wait_with_output()
+            .await
             .map_err(|e| BenchError::Git(format!("Failed to run git apply: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(BenchError::PatchValidation(format!(
-                "Patch validation failed: {}",
-                stderr
-            )));
+            return Err(BenchError::PatchValidation(format!("Patch validation failed: {}", stderr)));
         }
 
         Ok(())
     }
 
-    fn apply_patch(&self, patch: &str) -> Result<()> {
-        use std::io::Write;
+    async fn apply_patch_async(&self, patch: &str) -> Result<()> {
         use std::process::Stdio;
 
-        let mut child = Command::new("git")
+        let mut child = TokioCommand::new("git")
             .arg("apply")
             .current_dir(&self.config.workspace_root)
             .stdin(Stdio::piped())
@@ -208,11 +246,13 @@ impl TaskRunner {
         if let Some(mut stdin) = child.stdin.take() {
             stdin
                 .write_all(patch.as_bytes())
+                .await
                 .map_err(|e| BenchError::Git(format!("Failed to write patch to stdin: {}", e)))?;
         }
 
         let output = child
             .wait_with_output()
+            .await
             .map_err(|e| BenchError::Git(format!("Failed to apply patch: {}", e)))?;
 
         if !output.status.success() {
@@ -223,12 +263,13 @@ impl TaskRunner {
         Ok(())
     }
 
-    fn run_build(&self, task: &EvalTask) -> Result<bool> {
+    async fn run_build_async(&self, task: &EvalTask) -> Result<bool> {
         for crate_name in &task.test_crates {
-            let output = Command::new("cargo")
+            let output = TokioCommand::new("cargo")
                 .args(&["build", "-p", crate_name, "--quiet"])
                 .current_dir(&self.config.workspace_root)
                 .output()
+                .await
                 .map_err(|e| BenchError::BuildFailed(format!("Build command failed: {}", e)))?;
 
             if !output.status.success() {
@@ -239,9 +280,9 @@ impl TaskRunner {
         Ok(true)
     }
 
-    fn run_tests(&self, task: &EvalTask) -> Result<bool> {
+    async fn run_tests_async(&self, task: &EvalTask) -> Result<bool> {
         for crate_name in &task.test_crates {
-            let mut cmd = Command::new("cargo");
+            let mut cmd = TokioCommand::new("cargo");
             cmd.arg("test")
                 .args(&["-p", crate_name])
                 .current_dir(&self.config.workspace_root);
@@ -252,6 +293,7 @@ impl TaskRunner {
 
             let output = cmd
                 .output()
+                .await
                 .map_err(|e| BenchError::TestFailed(format!("Test command failed: {}", e)))?;
 
             if !output.status.success() {
@@ -262,19 +304,29 @@ impl TaskRunner {
         Ok(true)
     }
 
-    fn revert_changes(&self) -> Result<()> {
-        let output = Command::new("git")
+    async fn revert_changes_async(&self) -> Result<()> {
+        let output = TokioCommand::new("git")
             .args(&["checkout", "--", "."])
             .current_dir(&self.config.workspace_root)
             .output()
+            .await
             .map_err(|e| BenchError::Git(format!("Failed to spawn git checkout: {}", e)))?;
 
         if !output.status.success() {
-            // Log warning but don't fail - revert should be best-effort
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("Warning: Failed to fully revert changes: {}", stderr);
         }
 
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn validate_patch_sync(&self, patch: &str) -> Result<()> {
+        if !patch.starts_with("--- ") || !patch.contains("\n+++ ") {
+            return Err(BenchError::PatchValidation(
+                "Patch missing proper --- and +++ headers (unified diff format required)".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -288,7 +340,6 @@ impl EvalResult {
         }
     }
 
-    /// Get unique task IDs from outcomes
     fn unique_task_ids(&self) -> std::collections::HashSet<&str> {
         self.outcomes.iter().map(|o| o.task_id.as_str()).collect()
     }
@@ -355,7 +406,6 @@ impl Default for EvalResult {
 mod tests {
     use super::*;
 
-    // Helper to create a test outcome
     fn test_outcome(task_id: &str, attempt: usize, tests_passed: bool, build_success: bool) -> TaskOutcome {
         TaskOutcome {
             task_id: task_id.to_string(),
@@ -395,12 +445,9 @@ mod tests {
     #[test]
     fn test_pass_at_1_multiple_tasks() {
         let mut result = EvalResult::new();
-        // Task 1: pass on first attempt
         result.outcomes.push(test_outcome("task1", 1, true, true));
-        // Task 2: fail on first attempt (but pass on second)
         result.outcomes.push(test_outcome("task2", 1, false, false));
         result.outcomes.push(test_outcome("task2", 2, true, true));
-        // Pass@1 should be 1/2 = 0.5
         assert_eq!(result.pass_at_1(), 0.5);
     }
 
@@ -413,7 +460,6 @@ mod tests {
     #[test]
     fn test_pass_at_k_within_limit() {
         let mut result = EvalResult::new();
-        // Task 1: pass on attempt 2 (within k=3)
         result.outcomes.push(test_outcome("task1", 1, false, false));
         result.outcomes.push(test_outcome("task1", 2, true, true));
         assert_eq!(result.pass_at_k(3), 1.0);
@@ -422,35 +468,27 @@ mod tests {
     #[test]
     fn test_pass_at_k_beyond_limit() {
         let mut result = EvalResult::new();
-        // Task 1: only passes on attempt 4 (beyond k=2)
         result.outcomes.push(test_outcome("task1", 1, false, false));
         result.outcomes.push(test_outcome("task1", 2, false, false));
         result.outcomes.push(test_outcome("task1", 3, false, false));
         result.outcomes.push(test_outcome("task1", 4, true, true));
-        // Pass@2 should be 0.0 (task doesn't pass within 2 attempts)
         assert_eq!(result.pass_at_k(2), 0.0);
-        // Pass@4 should be 1.0
         assert_eq!(result.pass_at_k(4), 1.0);
     }
 
     #[test]
     fn test_pass_at_k_multiple_tasks() {
         let mut result = EvalResult::new();
-        // Task 1: passes on attempt 1
         result.outcomes.push(test_outcome("task1", 1, true, true));
-        // Task 2: passes on attempt 3
         result.outcomes.push(test_outcome("task2", 1, false, false));
         result.outcomes.push(test_outcome("task2", 2, false, false));
         result.outcomes.push(test_outcome("task2", 3, true, true));
-        // Task 3: never passes
         result.outcomes.push(test_outcome("task3", 1, false, false));
         result.outcomes.push(test_outcome("task3", 2, false, false));
 
-        // Pass@2: tasks 1 passes, 2 doesn't, 3 doesn't = 1/3 ≈ 0.333
         let pass_at_2 = result.pass_at_k(2);
         assert!((pass_at_2 - 0.333).abs() < 0.01);
 
-        // Pass@3: tasks 1 and 2 pass, 3 doesn't = 2/3 ≈ 0.667
         let pass_at_3 = result.pass_at_k(3);
         assert!((pass_at_3 - 0.667).abs() < 0.01);
     }
@@ -480,20 +518,17 @@ mod tests {
     #[test]
     fn test_compilation_rate_partial() {
         let mut result = EvalResult::new();
-        result.outcomes.push(test_outcome("task1", 1, false, true));  // compiled, no test
-        result.outcomes.push(test_outcome("task2", 1, true, true));   // compiled, passed
-        result.outcomes.push(test_outcome("task3", 1, false, false)); // didn't compile
-        // 2 out of 3 compiled
+        result.outcomes.push(test_outcome("task1", 1, false, true));
+        result.outcomes.push(test_outcome("task2", 1, true, true));
+        result.outcomes.push(test_outcome("task3", 1, false, false));
         assert!((result.compilation_rate() - (2.0 / 3.0)).abs() < 0.01);
     }
 
     #[test]
     fn test_unique_task_ids() {
         let mut result = EvalResult::new();
-        // Same task, multiple attempts
         result.outcomes.push(test_outcome("task1", 1, false, false));
         result.outcomes.push(test_outcome("task1", 2, true, true));
-        // Different tasks
         result.outcomes.push(test_outcome("task2", 1, true, true));
         result.outcomes.push(test_outcome("task3", 1, false, true));
 
@@ -506,12 +541,7 @@ mod tests {
 
     #[test]
     fn test_patch_validation_format_check() {
-        // Test format validation (happens before git apply)
-        // These patches have correct format but won't apply to real files
         let patch_valid = "--- a/file.rs\n+++ b/file.rs\n@@ -1,3 +1,4 @@\n-old\n+new";
-
-        // The format check will pass; git apply will fail (no actual files)
-        // but we're testing the format validation logic
         assert!(patch_valid.starts_with("--- "));
         assert!(patch_valid.contains("\n+++ "));
     }
@@ -520,29 +550,101 @@ mod tests {
     fn test_patch_validation_missing_header() {
         let config = RunConfig::new(".");
         let runner = TaskRunner::new(config);
-
         let patch = "some invalid patch without headers";
-        assert!(runner.validate_patch(patch).is_err());
+        assert!(runner.validate_patch_sync(patch).is_err());
     }
 
     #[test]
     fn test_patch_validation_loose_format() {
         let config = RunConfig::new(".");
         let runner = TaskRunner::new(config);
-
-        // Missing "--- " with space (no space after ---)
         let patch = "---a/file.rs\n+++ b/file.rs\n@@ -1 @@\n";
-        assert!(runner.validate_patch(patch).is_err());
+        assert!(runner.validate_patch_sync(patch).is_err());
     }
 
     #[test]
     fn test_patch_validation_missing_plus_plus() {
         let config = RunConfig::new(".");
         let runner = TaskRunner::new(config);
-
-        // Has "--- " but missing "+++ " (no space and newline before)
         let patch = "--- a/file.rs\nno plus plus here";
-        assert!(runner.validate_patch(patch).is_err());
+        assert!(runner.validate_patch_sync(patch).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_patch_async_invalid_header() {
+        let config = RunConfig::new(".");
+        let runner = TaskRunner::new(config);
+        let patch = "some invalid patch without headers";
+        let result = runner.validate_patch_async(patch).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing proper"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_patch_async_timeout() {
+        let config = RunConfig::new(".");
+        let runner = TaskRunner::new(config);
+        let valid_format_patch = "--- a/file.rs\n+++ b/file.rs\n@@ -1 @@\n";
+        let result = tokio::time::timeout(Duration::from_secs(0), runner.validate_patch_async(valid_format_patch)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_run_build_async_nonexistent_crate() {
+        let config = RunConfig::new(".");
+        let runner = TaskRunner::new(config);
+        let task = EvalTask {
+            id: "test".to_string(),
+            title: "test".to_string(),
+            description: "test".to_string(),
+            issue: None,
+            fix_commit: None,
+            test_crates: vec!["nonexistent_crate_xyz".to_string()],
+            test_filters: vec![],
+            context_files: vec![],
+            timeout_secs: 10,
+            golden_patch: None,
+        };
+        let result = runner.run_build_async(&task).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), false);
+    }
+
+    #[tokio::test]
+    async fn test_run_tests_async_early_exit() {
+        let config = RunConfig::new(".");
+        let runner = TaskRunner::new(config);
+        let task = EvalTask {
+            id: "test".to_string(),
+            title: "test".to_string(),
+            description: "test".to_string(),
+            issue: None,
+            fix_commit: None,
+            test_crates: vec!["nonexistent_crate_xyz".to_string()],
+            test_filters: vec![],
+            context_files: vec![],
+            timeout_secs: 10,
+            golden_patch: None,
+        };
+        let result = runner.run_tests_async(&task).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), false);
+    }
+
+    #[tokio::test]
+    async fn test_revert_changes_async_clean_workspace() {
+        let config = RunConfig::new(".");
+        let runner = TaskRunner::new(config);
+        let result = runner.revert_changes_async().await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_timeout_error_variant() {
+        let err = BenchError::Timeout;
+        let display = format!("{}", err);
+        assert!(!display.is_empty());
+        assert!(display.contains("Timeout"));
     }
 
     #[test]
