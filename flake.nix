@@ -2,8 +2,11 @@
   description = "oxidizedMLX — Rust-first MLX runtime";
 
   nixConfig = {
-    extra-substituters = [ "https://nix-cache.stevedores.org/oxidizedmlx" ];
-    extra-trusted-public-keys = [ "oxidizedmlx-cache-1:uG3uzexkJno1b3b+dek7tHnHzr1p6MHxIoVTqnp/JBI=" ];
+    extra-substituters = [ "https://nix-cache.stevedores.org/" ];
+    extra-trusted-public-keys = [
+      "stevedores-1:ZEtb+wHYNR/LDmMDhF3/EpRZDNma8exY2b1TGZ6uS2A="
+      "oxidizedmlx-cache-1:uG3uzexkJno1b3b+dek7tHnHzr1p6MHxIoVTqnp/JBI="
+    ];
   };
 
   inputs = {
@@ -47,8 +50,10 @@
 
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.libiconv
-            pkgs.darwin.apple_sdk.frameworks.Metal
-            pkgs.darwin.apple_sdk.frameworks.Foundation
+            # Modern nixpkgs SDK approach (replaces removed darwin.apple_sdk.frameworks.*).
+            # apple-sdk_15 provides Metal, Foundation, and other frameworks at SDK 15 level
+            # (apple-sdk_11/12/13/14 were removed when nixpkgs dropped older macOS support).
+            pkgs.apple-sdk_15
           ];
 
           nativeBuildInputs = [
