@@ -41,13 +41,13 @@ jobs:
           nix build .#default --no-link --print-out-paths >> /tmp/built-paths
 
           # Dev shell (so downstream `nix develop` is a download not a build)
-          nix build ".#devShells.${system}.default" --no-link --print-out-paths >> /tmp/built-paths || true
+          nix build ".#devShells.${system}.default" --no-link --print-out-paths >> /tmp/built-paths
 
           # All checks (clippy, tests, fmt, etc.) — populates cache for `nix flake check`
           checks=$(nix flake show --json --quiet 2>/dev/null \
                     | jq -r --arg s "$system" '.checks[$s] // {} | keys[]' 2>/dev/null || true)
           for check in $checks; do
-            nix build ".#checks.${system}.${check}" --no-link --print-out-paths >> /tmp/built-paths || true
+            nix build ".#checks.${system}.${check}" --no-link --print-out-paths >> /tmp/built-paths
           done
 
           echo "--- paths to sign and push ---"
@@ -73,18 +73,19 @@ jobs:
           install -m 600 /dev/null /tmp/nix-cache.netrc
           cat > /tmp/nix-cache.netrc <<EOF
           machine nix-cache.stevedores.org
+          login stevedores
           password ${NIX_CACHE_AUTH_TOKEN:-anything}
           EOF
 
           # Sign all built paths recursively (closure)
-          xargs -a /tmp/built-paths nix store sign \
+          xargs nix store sign \
             --key-file /tmp/nix-cache.key \
-            --recursive
+            --recursive < /tmp/built-paths
 
           # Push closure to cache
-          xargs -a /tmp/built-paths nix copy \
+          xargs nix copy \
             --to "https://nix-cache.stevedores.org/" \
-            --option netrc-file /tmp/nix-cache.netrc
+            --option netrc-file /tmp/nix-cache.netrc < /tmp/built-paths
 
       - name: Cleanup secrets
         if: always()
