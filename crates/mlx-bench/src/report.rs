@@ -103,7 +103,7 @@ impl Reporter {
             "| Compilation Rate | {:.2}% |\n",
             result.compilation_rate() * 100.0
         ));
-        output.push_str("\n");
+        output.push('\n');
 
         // Aggregate by task
         let mut task_map: HashMap<String, Vec<_>> = HashMap::new();
