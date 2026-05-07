@@ -1,7 +1,7 @@
 use crate::error::{BenchError, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvalTask {
@@ -26,7 +26,6 @@ pub struct ContextFile {
 
 pub struct TaskSet {
     tasks: Vec<EvalTask>,
-    base_dir: PathBuf,
 }
 
 impl TaskSet {
@@ -49,27 +48,20 @@ impl TaskSet {
             .map_err(|e| BenchError::InvalidConfig(format!("Glob error: {}", e)))?;
 
         for entry in entries {
-            let path = entry.map_err(|e| {
-                BenchError::InvalidConfig(format!("Path iteration error: {}", e))
-            })?;
+            let path = entry
+                .map_err(|e| BenchError::InvalidConfig(format!("Path iteration error: {}", e)))?;
 
-            let content = fs::read_to_string(&path)
-                .map_err(|e| BenchError::Io(e))?;
+            let content = fs::read_to_string(&path).map_err(BenchError::Io)?;
 
             let task: EvalTask = serde_json::from_str(&content)
-                .map_err(|e| {
-                    BenchError::InvalidTask(format!("{}: {}", path.display(), e))
-                })?;
+                .map_err(|e| BenchError::InvalidTask(format!("{}: {}", path.display(), e)))?;
 
             tasks.push(task);
         }
 
         tasks.sort_by(|a, b| a.id.cmp(&b.id));
 
-        Ok(TaskSet {
-            tasks,
-            base_dir: base_dir.to_path_buf(),
-        })
+        Ok(TaskSet { tasks })
     }
 
     pub fn all(&self) -> &[EvalTask] {
@@ -83,22 +75,18 @@ impl TaskSet {
     pub fn by_glob(&self, glob_pattern: &str) -> Vec<&EvalTask> {
         self.tasks
             .iter()
-            .filter(|t| glob::Pattern::new(glob_pattern)
-                .map(|p| p.matches(&t.id))
-                .unwrap_or(false))
+            .filter(|t| {
+                glob::Pattern::new(glob_pattern)
+                    .map(|p| p.matches(&t.id))
+                    .unwrap_or(false)
+            })
             .collect()
-    }
-
-    pub fn base_dir(&self) -> &Path {
-        &self.base_dir
     }
 
     pub fn validate(&self) -> Result<()> {
         for task in &self.tasks {
             if task.id.is_empty() {
-                return Err(BenchError::InvalidTask(
-                    "Task missing id".to_string(),
-                ));
+                return Err(BenchError::InvalidTask("Task missing id".to_string()));
             }
             if task.title.is_empty() {
                 return Err(BenchError::InvalidTask(format!(
@@ -147,8 +135,7 @@ impl ContextFile {
             )));
         }
 
-        let content = fs::read_to_string(&path)
-            .map_err(|e| BenchError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(BenchError::Io)?;
 
         match self.lines {
             None => Ok(content),

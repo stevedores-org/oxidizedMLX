@@ -114,9 +114,6 @@ impl TaskSet {
     /// Get tasks matching glob pattern
     pub fn by_glob(&self, glob_pattern: &str) -> Vec<&EvalTask>;
 
-    /// Base directory path
-    pub fn base_dir(&self) -> &Path;
-
     /// Validate all tasks
     pub fn validate(&self) -> Result<()>;
 }
@@ -325,9 +322,6 @@ pub trait LlmBackend: Send + Sync {
         task: &EvalTask,
         opts: &BackendOpts,
     ) -> Result<String>;
-
-    /// Backend name for logging
-    fn name(&self) -> &str;
 }
 ```
 
@@ -356,10 +350,6 @@ impl LlmBackend for CustomBackend {
         // Call your LLM API
         // Return patch text
         Ok("--- a/...".to_string())
-    }
-
-    fn name(&self) -> &str {
-        "custom"
     }
 }
 ```
@@ -409,7 +399,6 @@ impl LlmBackend for LocalMlxBackend { ... }
 use mlx_bench::backend::LocalMlxBackend;
 
 let backend = LocalMlxBackend::new("deepseek-coder-1.3b");
-println!("Backend: {}", backend.name());  // "local"
 // Will return error indicating mlx-rs bindings are required
 ```
 
@@ -440,11 +429,10 @@ The `AnthropicApiBackend` creates a new `tokio::runtime::Runtime` for each `gene
 
 **Example:**
 ```rust
-use mlx_bench::backend::AnthropicApiBackend;
+use mlx_bench::backend::{AnthropicApiBackend, LlmBackend};
 
 // Requires ANTHROPIC_API_KEY environment variable
 let backend = AnthropicApiBackend::new()?;
-println!("Backend: {}", backend.name());  // "anthropic"
 
 // The backend will call the Anthropic API and return a patch
 let patch = backend.generate_patch(&task, &opts)?;

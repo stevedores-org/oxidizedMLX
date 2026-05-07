@@ -32,6 +32,7 @@ pub struct EvalResult {
 pub struct RunConfig {
     pub workspace_root: PathBuf,
     pub max_attempts: usize,
+    #[allow(dead_code)]
     pub timeout_secs: u64,
 }
 
@@ -156,7 +157,8 @@ impl TaskRunner {
         // Stricter check: must start with "--- " and contain "\n+++ "
         if !patch.starts_with("--- ") || !patch.contains("\n+++ ") {
             return Err(BenchError::PatchValidation(
-                "Patch missing proper --- and +++ headers (unified diff format required)".to_string(),
+                "Patch missing proper --- and +++ headers (unified diff format required)"
+                    .to_string(),
             ));
         }
 
@@ -217,7 +219,10 @@ impl TaskRunner {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(BenchError::Git(format!("Patch application failed: {}", stderr)));
+            return Err(BenchError::Git(format!(
+                "Patch application failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -226,7 +231,7 @@ impl TaskRunner {
     fn run_build(&self, task: &EvalTask) -> Result<bool> {
         for crate_name in &task.test_crates {
             let output = Command::new("cargo")
-                .args(&["build", "-p", crate_name, "--quiet"])
+                .args(["build", "-p", crate_name, "--quiet"])
                 .current_dir(&self.config.workspace_root)
                 .output()
                 .map_err(|e| BenchError::BuildFailed(format!("Build command failed: {}", e)))?;
@@ -243,7 +248,7 @@ impl TaskRunner {
         for crate_name in &task.test_crates {
             let mut cmd = Command::new("cargo");
             cmd.arg("test")
-                .args(&["-p", crate_name])
+                .args(["-p", crate_name])
                 .current_dir(&self.config.workspace_root);
 
             for filter in &task.test_filters {
@@ -264,7 +269,7 @@ impl TaskRunner {
 
     fn revert_changes(&self) -> Result<()> {
         let output = Command::new("git")
-            .args(&["checkout", "--", "."])
+            .args(["checkout", "--", "."])
             .current_dir(&self.config.workspace_root)
             .output()
             .map_err(|e| BenchError::Git(format!("Failed to spawn git checkout: {}", e)))?;
@@ -356,7 +361,12 @@ mod tests {
     use super::*;
 
     // Helper to create a test outcome
-    fn test_outcome(task_id: &str, attempt: usize, tests_passed: bool, build_success: bool) -> TaskOutcome {
+    fn test_outcome(
+        task_id: &str,
+        attempt: usize,
+        tests_passed: bool,
+        build_success: bool,
+    ) -> TaskOutcome {
         TaskOutcome {
             task_id: task_id.to_string(),
             attempt,
@@ -480,8 +490,8 @@ mod tests {
     #[test]
     fn test_compilation_rate_partial() {
         let mut result = EvalResult::new();
-        result.outcomes.push(test_outcome("task1", 1, false, true));  // compiled, no test
-        result.outcomes.push(test_outcome("task2", 1, true, true));   // compiled, passed
+        result.outcomes.push(test_outcome("task1", 1, false, true)); // compiled, no test
+        result.outcomes.push(test_outcome("task2", 1, true, true)); // compiled, passed
         result.outcomes.push(test_outcome("task3", 1, false, false)); // didn't compile
         // 2 out of 3 compiled
         assert!((result.compilation_rate() - (2.0 / 3.0)).abs() < 0.01);
