@@ -53,8 +53,7 @@ impl TaskSet {
                 BenchError::InvalidConfig(format!("Path iteration error: {}", e))
             })?;
 
-            let content = fs::read_to_string(&path)
-                .map_err(|e| BenchError::Io(e))?;
+            let content = fs::read_to_string(&path).map_err(BenchError::Io)?;
 
             let task: EvalTask = serde_json::from_str(&content)
                 .map_err(|e| {
@@ -147,8 +146,7 @@ impl ContextFile {
             )));
         }
 
-        let content = fs::read_to_string(&path)
-            .map_err(|e| BenchError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(BenchError::Io)?;
 
         match self.lines {
             None => Ok(content),
