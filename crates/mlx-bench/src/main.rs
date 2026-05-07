@@ -4,7 +4,7 @@ mod report;
 mod runner;
 mod task;
 
-use backend::{AnthropicApiBackend, BackendOpts, LocalMlxBackend, StdinDebugBackend, LlmBackend};
+use backend::{AnthropicApiBackend, BackendOpts, LocalMlxBackend, StdinDebugBackend};
 use clap::{Parser, Subcommand};
 use error::Result;
 use report::{ReportFormat, Reporter};
@@ -107,9 +107,10 @@ fn run(args: Args) -> Result<()> {
 
     match args.cmd {
         Cmd::ListTasks { json } => cmd_list_tasks(&tasks, json),
-        Cmd::ShowTask { task_id, show_context } => {
-            cmd_show_task(&tasks, &task_id, show_context, &args.workspace)
-        }
+        Cmd::ShowTask {
+            task_id,
+            show_context,
+        } => cmd_show_task(&tasks, &task_id, show_context, &args.workspace),
         Cmd::ValidateTasks => cmd_validate_tasks(&tasks),
         Cmd::SelfTest { filter } => cmd_self_test(&tasks, filter.as_deref(), &args.workspace),
         Cmd::Run {
@@ -127,9 +128,11 @@ fn run(args: Args) -> Result<()> {
             dry_run,
             &args.workspace,
         ),
-        Cmd::Report { format, latest, file } => {
-            cmd_report(&format, latest, file.as_deref())
-        }
+        Cmd::Report {
+            format,
+            latest,
+            file,
+        } => cmd_report(&format, latest, file.as_deref()),
     }
 }
 
@@ -317,7 +320,7 @@ fn cmd_run(
                 return Err(error::BenchError::InvalidConfig(format!(
                     "Unknown backend: {}",
                     backend_name
-                )))
+                )));
             }
         };
 
@@ -353,7 +356,7 @@ fn cmd_report(format_str: &str, latest: bool, file: Option<&std::path::Path>) ->
             return Err(error::BenchError::InvalidConfig(format!(
                 "Unknown format: {}",
                 format_str
-            )))
+            )));
         }
     };
 
@@ -370,21 +373,18 @@ fn cmd_report(format_str: &str, latest: bool, file: Option<&std::path::Path>) ->
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                if let Ok(metadata) = entry.metadata() {
-                    if let Ok(modified) = metadata.modified() {
-                        if modified > latest_time {
-                            latest_time = modified;
-                            latest_file = Some(path);
-                        }
-                    }
-                }
+            if path.extension().and_then(|s| s.to_str()) == Some("json")
+                && let Ok(metadata) = entry.metadata()
+                && let Ok(modified) = metadata.modified()
+                && modified > latest_time
+            {
+                latest_time = modified;
+                latest_file = Some(path);
             }
         }
 
-        latest_file.ok_or_else(|| {
-            error::BenchError::InvalidConfig("No result files found".to_string())
-        })?
+        latest_file
+            .ok_or_else(|| error::BenchError::InvalidConfig("No result files found".to_string()))?
     } else {
         return Err(error::BenchError::InvalidConfig(
             "Must specify --file or --latest".to_string(),

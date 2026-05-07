@@ -18,6 +18,7 @@ pub enum BenchError {
     Backend(String),
 
     #[error("LLM generation failed: {0}")]
+    #[allow(dead_code)]
     LlmGeneration(String),
 
     #[error("Patch validation failed: {0}")]
@@ -33,6 +34,7 @@ pub enum BenchError {
     Git(String),
 
     #[error("Timeout exceeded")]
+    #[allow(dead_code)]
     Timeout,
 
     #[error("Invalid configuration: {0}")]
@@ -47,7 +49,10 @@ mod tests {
 
     #[test]
     fn test_error_display_io() {
-        let err = BenchError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
+        let err = BenchError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
         assert!(err.to_string().contains("IO error"));
     }
 

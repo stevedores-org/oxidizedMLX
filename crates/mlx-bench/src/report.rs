@@ -40,7 +40,10 @@ impl Reporter {
         output.push_str(&format!("Pass@1: {:.2}%\n", result.pass_at_1() * 100.0));
         output.push_str(&format!("Pass@3: {:.2}%\n", result.pass_at_k(3) * 100.0));
         output.push_str(&format!("Pass@5: {:.2}%\n", result.pass_at_k(5) * 100.0));
-        output.push_str(&format!("Compilation Rate: {:.2}%\n\n", result.compilation_rate() * 100.0));
+        output.push_str(&format!(
+            "Compilation Rate: {:.2}%\n\n",
+            result.compilation_rate() * 100.0
+        ));
 
         // Task details
         output.push_str("=== TASK RESULTS ===\n");
@@ -96,9 +99,18 @@ impl Reporter {
         output.push_str("## Summary Metrics\n\n");
         output.push_str("| Metric | Value |\n");
         output.push_str("|--------|-------|\n");
-        output.push_str(&format!("| Pass@1 | {:.2}% |\n", result.pass_at_1() * 100.0));
-        output.push_str(&format!("| Pass@3 | {:.2}% |\n", result.pass_at_k(3) * 100.0));
-        output.push_str(&format!("| Pass@5 | {:.2}% |\n", result.pass_at_k(5) * 100.0));
+        output.push_str(&format!(
+            "| Pass@1 | {:.2}% |\n",
+            result.pass_at_1() * 100.0
+        ));
+        output.push_str(&format!(
+            "| Pass@3 | {:.2}% |\n",
+            result.pass_at_k(3) * 100.0
+        ));
+        output.push_str(&format!(
+            "| Pass@5 | {:.2}% |\n",
+            result.pass_at_k(5) * 100.0
+        ));
         output.push_str(&format!(
             "| Compilation Rate | {:.2}% |\n",
             result.compilation_rate() * 100.0
