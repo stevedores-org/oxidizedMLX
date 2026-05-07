@@ -226,7 +226,7 @@ impl TaskRunner {
     fn run_build(&self, task: &EvalTask) -> Result<bool> {
         for crate_name in &task.test_crates {
             let output = Command::new("cargo")
-                .args(&["build", "-p", crate_name, "--quiet"])
+                .args(["build", "-p", crate_name, "--quiet"])
                 .current_dir(&self.config.workspace_root)
                 .output()
                 .map_err(|e| BenchError::BuildFailed(format!("Build command failed: {}", e)))?;
@@ -243,7 +243,7 @@ impl TaskRunner {
         for crate_name in &task.test_crates {
             let mut cmd = Command::new("cargo");
             cmd.arg("test")
-                .args(&["-p", crate_name])
+                .args(["-p", crate_name])
                 .current_dir(&self.config.workspace_root);
 
             for filter in &task.test_filters {
@@ -264,7 +264,7 @@ impl TaskRunner {
 
     fn revert_changes(&self) -> Result<()> {
         let output = Command::new("git")
-            .args(&["checkout", "--", "."])
+            .args(["checkout", "--", "."])
             .current_dir(&self.config.workspace_root)
             .output()
             .map_err(|e| BenchError::Git(format!("Failed to spawn git checkout: {}", e)))?;
