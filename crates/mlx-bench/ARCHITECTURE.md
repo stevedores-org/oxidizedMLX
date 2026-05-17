@@ -17,6 +17,7 @@ The `LlmBackend` trait enables pluggable LLM providers:
 ```rust
 pub trait LlmBackend: Send + Sync {
     fn generate_patch(&self, task: &EvalTask, opts: &BackendOpts) -> Result<String>;
+    fn name(&self) -> &str;
 }
 ```
 
@@ -185,6 +186,7 @@ impl TaskRunner {
 ```rust
 pub trait LlmBackend: Send + Sync {
     fn generate_patch(&self, task: &EvalTask, opts: &BackendOpts) -> Result<String>;
+    fn name(&self) -> &str;
 }
 ```
 
@@ -337,6 +339,7 @@ TaskSet::load_from_dir()
     ↓
 TaskSet {
     tasks: Vec<EvalTask>,
+    base_dir: PathBuf,
 }
     ↓
 [In-memory task collection]
@@ -400,6 +403,10 @@ pub struct MyBackend {
 impl LlmBackend for MyBackend {
     fn generate_patch(&self, task: &EvalTask, opts: &BackendOpts) -> Result<String> {
         // Your implementation
+    }
+
+    fn name(&self) -> &str {
+        "my-backend"
     }
 }
 ```

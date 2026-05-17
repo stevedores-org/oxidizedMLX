@@ -13,6 +13,8 @@ pub struct BackendOpts {
 
 pub trait LlmBackend: Send + Sync {
     fn generate_patch(&self, task: &EvalTask, opts: &BackendOpts) -> Result<String>;
+    #[allow(dead_code)]
+    fn name(&self) -> &str;
 }
 
 /// Anthropic API backend using official Rust SDK
@@ -38,6 +40,10 @@ impl LlmBackend for AnthropicApiBackend {
 
         rt.block_on(async { generate_patch_async(task, opts, &self.api_key).await })
     }
+
+    fn name(&self) -> &str {
+        "anthropic"
+    }
 }
 
 async fn generate_patch_async(
@@ -45,7 +51,10 @@ async fn generate_patch_async(
     opts: &BackendOpts,
     api_key: &str,
 ) -> Result<String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(opts.timeout_secs))
+        .build()
+        .map_err(|e| BenchError::Backend(format!("Failed to build HTTP client: {}", e)))?;
 
     // Assemble prompt
     let system_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
@@ -159,6 +168,10 @@ impl LlmBackend for LocalMlxBackend {
                 .to_string(),
         ))
     }
+
+    fn name(&self) -> &str {
+        "local"
+    }
 }
 
 /// Debug backend that reads patch from environment or file
@@ -177,6 +190,10 @@ impl LlmBackend for StdinDebugBackend {
                     .to_string(),
             ))
         }
+    }
+
+    fn name(&self) -> &str {
+        "debug"
     }
 }
 

@@ -213,7 +213,7 @@ impl MetalBackend {
     fn eval_transpose(
         &self,
         inputs: &[NodeInput<'_>],
-        meta: &TensorMeta,
+        _meta: &TensorMeta,
         axes: &Option<Vec<usize>>,
     ) -> Result<Vec<f32>> {
         let x = inputs[0].data;
