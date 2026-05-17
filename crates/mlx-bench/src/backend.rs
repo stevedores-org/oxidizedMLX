@@ -13,6 +13,7 @@ pub struct BackendOpts {
 
 pub trait LlmBackend: Send + Sync {
     fn generate_patch(&self, task: &EvalTask, opts: &BackendOpts) -> Result<String>;
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 }
 
@@ -23,10 +24,9 @@ pub struct AnthropicApiBackend {
 
 impl AnthropicApiBackend {
     pub fn new() -> Result<Self> {
-        let api_key = env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| BenchError::Backend(
-                "ANTHROPIC_API_KEY environment variable not set".to_string()
-            ))?;
+        let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| {
+            BenchError::Backend("ANTHROPIC_API_KEY environment variable not set".to_string())
+        })?;
 
         Ok(AnthropicApiBackend { api_key })
     }
@@ -38,9 +38,7 @@ impl LlmBackend for AnthropicApiBackend {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| BenchError::Backend(format!("Failed to create runtime: {}", e)))?;
 
-        rt.block_on(async {
-            generate_patch_async(task, opts, &self.api_key).await
-        })
+        rt.block_on(async { generate_patch_async(task, opts, &self.api_key).await })
     }
 
     fn name(&self) -> &str {
@@ -188,7 +186,8 @@ impl LlmBackend for StdinDebugBackend {
             Ok(patch_content)
         } else {
             Err(BenchError::Backend(
-                "Set either BENCH_PATCH_FILE or BENCH_PATCH_CONTENT environment variable".to_string(),
+                "Set either BENCH_PATCH_FILE or BENCH_PATCH_CONTENT environment variable"
+                    .to_string(),
             ))
         }
     }

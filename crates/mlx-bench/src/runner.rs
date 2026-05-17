@@ -35,6 +35,7 @@ pub struct EvalResult {
 pub struct RunConfig {
     pub workspace_root: PathBuf,
     pub max_attempts: usize,
+    #[allow(dead_code)]
     pub timeout_secs: u64,
 }
 
@@ -109,10 +110,10 @@ impl TaskRunner {
                 outcome.patch_text = Some(patch.clone());
 
                 // Steps 2-6: Subprocess operations with timeouts (async)
-                if let Err(e) = rt.block_on(self.run_subprocess_steps(&mut outcome, task, &patch)) {
-                    if outcome.error.is_none() {
-                        outcome.error = Some(format!("Subprocess orchestration failed: {}", e));
-                    }
+                if let Err(e) = rt.block_on(self.run_subprocess_steps(&mut outcome, task, &patch))
+                    && outcome.error.is_none()
+                {
+                    outcome.error = Some(format!("Subprocess orchestration failed: {}", e));
                 }
             }
             Err(e) => {
@@ -147,7 +148,7 @@ impl TaskRunner {
 
         // Step 3: Apply patch
         match tokio::time::timeout(GIT_TIMEOUT, self.apply_patch_async(patch)).await {
-            Ok(Ok(())) => {},
+            Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 outcome.error = Some(format!("Patch application failed: {}", e));
                 return Ok(());
@@ -197,7 +198,8 @@ impl TaskRunner {
 
         if !patch.starts_with("--- ") || !patch.contains("\n+++ ") {
             return Err(BenchError::PatchValidation(
-                "Patch missing proper --- and +++ headers (unified diff format required)".to_string(),
+                "Patch missing proper --- and +++ headers (unified diff format required)"
+                    .to_string(),
             ));
         }
 
@@ -225,7 +227,10 @@ impl TaskRunner {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(BenchError::PatchValidation(format!("Patch validation failed: {}", stderr)));
+            return Err(BenchError::PatchValidation(format!(
+                "Patch validation failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -257,7 +262,10 @@ impl TaskRunner {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(BenchError::Git(format!("Patch application failed: {}", stderr)));
+            return Err(BenchError::Git(format!(
+                "Patch application failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -266,7 +274,7 @@ impl TaskRunner {
     async fn run_build_async(&self, task: &EvalTask) -> Result<bool> {
         for crate_name in &task.test_crates {
             let output = TokioCommand::new("cargo")
-                .args(&["build", "-p", crate_name, "--quiet"])
+                .args(["build", "-p", crate_name, "--quiet"])
                 .current_dir(&self.config.workspace_root)
                 .output()
                 .await
@@ -284,7 +292,7 @@ impl TaskRunner {
         for crate_name in &task.test_crates {
             let mut cmd = TokioCommand::new("cargo");
             cmd.arg("test")
-                .args(&["-p", crate_name])
+                .args(["-p", crate_name])
                 .current_dir(&self.config.workspace_root);
 
             for filter in &task.test_filters {
@@ -306,7 +314,7 @@ impl TaskRunner {
 
     async fn revert_changes_async(&self) -> Result<()> {
         let output = TokioCommand::new("git")
-            .args(&["checkout", "--", "."])
+            .args(["checkout", "--", "."])
             .current_dir(&self.config.workspace_root)
             .output()
             .await
@@ -324,7 +332,8 @@ impl TaskRunner {
     fn validate_patch_sync(&self, patch: &str) -> Result<()> {
         if !patch.starts_with("--- ") || !patch.contains("\n+++ ") {
             return Err(BenchError::PatchValidation(
-                "Patch missing proper --- and +++ headers (unified diff format required)".to_string(),
+                "Patch missing proper --- and +++ headers (unified diff format required)"
+                    .to_string(),
             ));
         }
         Ok(())
@@ -406,7 +415,12 @@ impl Default for EvalResult {
 mod tests {
     use super::*;
 
-    fn test_outcome(task_id: &str, attempt: usize, tests_passed: bool, build_success: bool) -> TaskOutcome {
+    fn test_outcome(
+        task_id: &str,
+        attempt: usize,
+        tests_passed: bool,
+        build_success: bool,
+    ) -> TaskOutcome {
         TaskOutcome {
             task_id: task_id.to_string(),
             attempt,
@@ -585,7 +599,11 @@ mod tests {
         let config = RunConfig::new(".");
         let runner = TaskRunner::new(config);
         let valid_format_patch = "--- a/file.rs\n+++ b/file.rs\n@@ -1 @@\n";
-        let result = tokio::time::timeout(Duration::from_secs(0), runner.validate_patch_async(valid_format_patch)).await;
+        let result = tokio::time::timeout(
+            Duration::from_secs(0),
+            runner.validate_patch_async(valid_format_patch),
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -607,7 +625,7 @@ mod tests {
         };
         let result = runner.run_build_async(&task).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -628,7 +646,7 @@ mod tests {
         };
         let result = runner.run_tests_async(&task).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
