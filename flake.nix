@@ -4,7 +4,7 @@
   nixConfig = {
     extra-substituters = [ "https://nix-cache.stevedores.org/" ];
     extra-trusted-public-keys = [
-      "stevedores-1:ZEtb+wHYNR/LDmMDhF3/EpRZDNma8exY2b1TGZ6uS2A="
+      "stevedores-cache-1:bXLxkipycRWproIJnk8pPWNFdgVfeV+I2mJXCoW4/ag="
       "oxidizedmlx-cache-1:uG3uzexkJno1b3b+dek7tHnHzr1p6MHxIoVTqnp/JBI="
     ];
   };

@@ -15,6 +15,7 @@ members = [
   "crates/mlx-cli",
   "crates/mlx-roadmap",
   "crates/mlx-bench",
+  "crates/mlx-parity",
 ]
 
 [workspace.package]
