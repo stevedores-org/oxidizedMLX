@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -54,17 +54,27 @@ impl Strangler {
     }
 
     pub fn diff_paths(&self, base: &str) -> Result<Vec<String>> {
+        let mut last_error = None;
         for separator in ["...", ".."] {
             let spec = format!("{base}{separator}HEAD");
             let output = Command::new("git")
                 .args(["diff", "--name-only", &spec])
                 .current_dir(&self.repo_root)
-                .output()?;
+                .output()
+                .with_context(|| format!("failed to run git diff for {spec}"))?;
             if output.status.success() {
                 return parse_paths(output.stdout);
             }
+            last_error = Some(format!(
+                "git diff --name-only {spec} failed with status {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
         }
-        Ok(Vec::new())
+        bail!(
+            "{}",
+            last_error.unwrap_or_else(|| "git diff failed without stderr".to_string())
+        )
     }
 
     pub fn tracked_paths(&self) -> Result<Vec<String>> {
@@ -150,7 +160,8 @@ fn normalize(path: &str) -> String {
 
 fn directory_size(path: &Path) -> std::io::Result<u64> {
     let mut total = 0;
-    for entry in walkdir::WalkDir::new(path).into_iter().flatten() {
+    for entry in walkdir::WalkDir::new(path) {
+        let entry = entry.map_err(std::io::Error::other)?;
         if entry.path().is_file() {
             total += entry.metadata()?.len();
         }
@@ -187,5 +198,77 @@ mod tests {
         ]);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].legacy_root, "tools/py_ref_runner");
+    }
+
+    #[test]
+    fn size_report_marks_missing_roots() {
+        let config = StranglerConfig {
+            legacy_roots: vec!["missing/root".to_string()],
+            descriptions: HashMap::new(),
+        };
+        let strangler = Strangler::new(config, PathBuf::from("."));
+        let report = strangler.size_report();
+
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].bytes, 0);
+        assert_eq!(report[0].status, "missing");
+    }
+
+    #[test]
+    fn diff_paths_reports_git_errors() {
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let config = StranglerConfig {
+            legacy_roots: vec!["legacy".to_string()],
+            descriptions: HashMap::new(),
+        };
+        let strangler = Strangler::new(config, temp.path().to_path_buf());
+
+        let error = strangler.diff_paths("origin/missing").unwrap_err();
+        assert!(error.to_string().contains("git diff --name-only"));
+    }
+
+    #[test]
+    fn diff_paths_reads_changed_files() {
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        run_git(temp.path(), &["init"]);
+        run_git(temp.path(), &["config", "user.email", "test@example.com"]);
+        run_git(temp.path(), &["config", "user.name", "Test User"]);
+        std::fs::write(temp.path().join("README.md"), "initial\n").unwrap();
+        run_git(temp.path(), &["add", "README.md"]);
+        run_git(temp.path(), &["commit", "-m", "initial"]);
+        std::fs::create_dir_all(temp.path().join("legacy")).unwrap();
+        std::fs::write(temp.path().join("legacy/file.txt"), "legacy\n").unwrap();
+        run_git(temp.path(), &["add", "legacy/file.txt"]);
+        run_git(temp.path(), &["commit", "-m", "legacy"]);
+
+        let config = StranglerConfig {
+            legacy_roots: vec!["legacy".to_string()],
+            descriptions: HashMap::new(),
+        };
+        let strangler = Strangler::new(config, temp.path().to_path_buf());
+        let paths = strangler.diff_paths("HEAD~1").unwrap();
+
+        assert_eq!(paths, vec!["legacy/file.txt"]);
+    }
+
+    fn git_available() -> bool {
+        Command::new("git").arg("--version").output().is_ok()
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 }
