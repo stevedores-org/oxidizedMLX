@@ -1,0 +1,67 @@
+name: Migration Tools
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  migration-tools:
+    name: API and code-health metrics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build migration tools
+        run: cargo build -p migration-tools --bins
+
+      - name: Extract OpenAPI discovery artifacts
+        run: |
+          target/debug/openapi-extractor \
+            --root . \
+            --output-dir target/migration-tools/openapi
+
+      - name: Run strangler scan baseline
+        run: |
+          target/debug/strangler \
+            --mode scan \
+            --report \
+            --json > target/migration-tools/strangler-scan.json
+
+      - name: Guard legacy paths in PRs
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          target/debug/strangler \
+            --mode diff \
+            --base origin/${{ github.base_ref }} \
+            --fail-on-legacy
+
+      - name: Write job summary
+        run: |
+          {
+            echo "## Migration tool metrics"
+            echo
+            echo "### OpenAPI discovery"
+            cat target/migration-tools/openapi/openapi-discovery.json
+            echo
+            echo "### Strangler scan"
+            cat target/migration-tools/strangler-scan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-tool-metrics
+          path: target/migration-tools/
+          retention-days: 30
