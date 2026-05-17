@@ -216,6 +216,10 @@ mod tests {
 
     #[test]
     fn diff_paths_reports_git_errors() {
+        if !git_available() {
+            return;
+        }
+
         let temp = tempfile::tempdir().unwrap();
         let config = StranglerConfig {
             legacy_roots: vec!["legacy".to_string()],
@@ -229,6 +233,10 @@ mod tests {
 
     #[test]
     fn diff_paths_reads_changed_files() {
+        if !git_available() {
+            return;
+        }
+
         let temp = tempfile::tempdir().unwrap();
         run_git(temp.path(), &["init"]);
         run_git(temp.path(), &["config", "user.email", "test@example.com"]);
@@ -249,6 +257,10 @@ mod tests {
         let paths = strangler.diff_paths("HEAD~1").unwrap();
 
         assert_eq!(paths, vec!["legacy/file.txt"]);
+    }
+
+    fn git_available() -> bool {
+        Command::new("git").arg("--version").output().is_ok()
     }
 
     fn run_git(dir: &Path, args: &[&str]) {
