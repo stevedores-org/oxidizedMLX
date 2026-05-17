@@ -41,7 +41,8 @@
           src = ./.;
           filter = path: type:
             (craneLib.filterCargoSources path type)
-            || pkgs.lib.hasSuffix ".h" path;
+            || pkgs.lib.hasSuffix ".h" path
+            || pkgs.lib.hasSuffix ".metal" path;
         };
 
         commonArgs = {
