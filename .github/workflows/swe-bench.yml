@@ -26,10 +26,16 @@ jobs:
     name: Run SWE-Bench Evaluation
     runs-on: macos-latest
 
-    # Gate on API key availability
-    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
-
     steps:
+      - name: Require ANTHROPIC_API_KEY secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set. Configure it in repo settings before triggering this workflow."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -86,4 +92,4 @@ jobs:
 
       - name: Comment on workflow run
         run: |
-          cargo run -p mlx-bench --release -- report --latest --format table >> $GITHUB_STEP_SUMMARY
+          cargo run -p mlx-bench --release -- report --latest --format table >> "$GITHUB_STEP_SUMMARY"
