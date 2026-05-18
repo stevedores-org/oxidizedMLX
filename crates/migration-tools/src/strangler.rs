@@ -81,11 +81,19 @@ impl Strangler {
         let output = Command::new("git")
             .args(["ls-files"])
             .current_dir(&self.repo_root)
-            .output()?;
+            .output()
+            .with_context(|| "failed to run git ls-files")?;
         if output.status.success() {
             parse_paths(output.stdout)
         } else {
-            Ok(Vec::new())
+            // Bail rather than silently returning Vec::new() — empty would
+            // classify as "no legacy hits" and CI would report all-clear on
+            // a broken git state, which is worse than no scan at all.
+            bail!(
+                "git ls-files failed with status {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
     }
 
@@ -229,6 +237,26 @@ mod tests {
 
         let error = strangler.diff_paths("origin/missing").unwrap_err();
         assert!(error.to_string().contains("git diff --name-only"));
+    }
+
+    #[test]
+    fn tracked_paths_reports_git_errors() {
+        if !git_available() {
+            return;
+        }
+
+        // tempdir is not a git repo, so `git ls-files` exits non-zero.
+        // Asserting we bail rather than silently returning an empty list —
+        // false-negative "no legacy hits" would mask CI gating failures.
+        let temp = tempfile::tempdir().unwrap();
+        let config = StranglerConfig {
+            legacy_roots: vec!["legacy".to_string()],
+            descriptions: HashMap::new(),
+        };
+        let strangler = Strangler::new(config, temp.path().to_path_buf());
+
+        let error = strangler.tracked_paths().unwrap_err();
+        assert!(error.to_string().contains("git ls-files"));
     }
 
     #[test]

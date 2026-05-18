@@ -598,14 +598,13 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("missing proper"));
     }
 
-    #[tokio::test]
-    async fn test_validate_patch_async_timeout() {
-        let result = tokio::time::timeout(Duration::from_millis(1), async {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        })
-        .await;
-        assert!(result.is_err());
-    }
+    // (Previous `test_validate_patch_async_timeout` was deleted: it only
+    // exercised `tokio::time::timeout` against an arbitrary sleep, not
+    // `validate_patch_async` itself. The real call site at line ~137 wraps
+    // the function with `GIT_TIMEOUT` and `tokio::time::timeout` is the
+    // upstream-tested primitive — there's no useful local invariant to
+    // assert. `test_validate_patch_async_invalid_header` covers the
+    // function's own error path.)
 
     #[tokio::test]
     async fn test_run_build_async_nonexistent_crate() {

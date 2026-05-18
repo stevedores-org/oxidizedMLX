@@ -60,10 +60,16 @@ jobs:
             echo "## Migration tool metrics"
             echo
             echo "### OpenAPI discovery"
+            echo '```json'
             cat target/migration-tools/openapi/openapi-discovery.json
             echo
+            echo '```'
+            echo
             echo "### Strangler scan"
+            echo '```json'
             cat target/migration-tools/strangler-scan.json
+            echo
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload metrics
