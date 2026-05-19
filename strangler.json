@@ -1,0 +1,8 @@
+{
+  "legacy_roots": [
+    "tools/py_ref_runner"
+  ],
+  "descriptions": {
+    "tools/py_ref_runner": "Python MLX reference-runner scripts kept for golden conformance while Rust parity coverage matures."
+  }
+}

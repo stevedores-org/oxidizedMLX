@@ -16,6 +16,7 @@ members = [
   "crates/mlx-roadmap",
   "crates/mlx-bench",
   "crates/mlx-parity",
+  "crates/migration-tools",
 ]
 
 [workspace.package]
@@ -46,3 +47,5 @@ chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
 anyhow = "1"
 log = "0.4"
+toml = "0.8"
+walkdir = "2"
