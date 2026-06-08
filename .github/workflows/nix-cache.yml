@@ -28,12 +28,20 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Determinate Nix
         uses: DeterminateSystems/determinate-nix-action@v3
 
       - name: Build outputs to cache
+        env:
+          # actions/checkout@v5 no longer leaves the GITHUB_TOKEN where the
+          # Determinate Nix daemon picks it up for access-tokens, so Nix's
+          # tarball fetch from api.github.com hits HTTP 401. Set it explicitly
+          # so the daemon authenticates and avoids unauthenticated rate
+          # limits / bad-credential rejection on github: flake inputs.
+          NIX_CONFIG: |
+            access-tokens = github.com=${{ github.token }}
         run: |
           set -euo pipefail
           system=$(nix eval --impure --raw --expr 'builtins.currentSystem')
