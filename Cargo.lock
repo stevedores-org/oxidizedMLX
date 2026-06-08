@@ -1157,6 +1157,7 @@ dependencies = [
 name = "mlx-nn"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "mlx-conformance",
  "mlx-core",
  "rand",

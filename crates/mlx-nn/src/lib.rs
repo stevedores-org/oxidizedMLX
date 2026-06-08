@@ -8,12 +8,14 @@ mod attention;
 mod dropout;
 mod embed;
 mod linear;
+mod mlp;
 mod norm;
 
 pub use attention::MultiHeadAttention;
 pub use dropout::Dropout;
 pub use embed::Embedding;
 pub use linear::Linear;
+pub use mlp::Mlp;
 pub use norm::{LayerNorm, RmsNorm};
 
 use mlx_core::{Result, Tensor};
